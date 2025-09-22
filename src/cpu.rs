@@ -2,12 +2,29 @@ use crate::cpu::decoder::{BType, IType, JType, RType, SType, UType};
 
 mod decoder;
 
+struct Csrs {
+    inner: [u64; 4096],
+}
+impl Csrs {
+    fn new() -> Self {
+        Self { inner: [0; 4096] }
+    }
+    fn write_exception(&mut self, mepc: u64, mcause: u64, mtval: u64) {
+        self.inner[0x341] = mepc;
+        self.inner[0x342] = mcause;
+        self.inner[0x343] = mtval;
+    }
+    fn mtvec(&self) -> u64 {
+        self.inner[0x305]
+    }
+}
+
 struct Memory {
     mem: Vec<u8>,
 }
 impl Memory {
     pub fn read_byte(&mut self, addr: u64) -> u8 {
-        self.mem[addr as usize]
+        self.mem[addr as usize - 0x80000000]
     }
     pub fn read_hword(&mut self, addr: u64) -> u16 {
         u16::from_le_bytes([self.read_byte(addr), self.read_byte(addr.wrapping_add(1))])
@@ -48,20 +65,52 @@ fn sext32(x: u32) -> u64 {
     x as i32 as i64 as u64
 }
 
+enum Exception {
+    InstructionAddressMisaligned { pc: u64 },
+    IllegalInstruction { pc: u64, instruction: u32 },
+    Breakpoint { pc: u64 },
+    LoadAccessFault { pc: u64, addr: u64 },
+    StoreAccessFault { pc: u64, addr: u64 },
+}
+
 pub struct Cpu {
     registers: [u64; 32],
-    pc: u64,
+    pub pc: u64,
+    csrs: Csrs,
     mem: Memory,
 }
 impl Cpu {
-    pub fn new(rom: Vec<u8>) -> Cpu {
-        Self { registers: [0; 32], pc: 0, mem: Memory { mem: rom } }
+    pub fn new(mem: Vec<u8>) -> Cpu {
+        Self { registers: [0; 32], pc: 0, mem: Memory { mem }, csrs: Csrs::new() }
     }
     pub fn step(&mut self) {
-        self.step_inner();
+        let exception = self.step_inner();
+        if let Some(exception) = exception {
+            self.handle_exception(exception);
+        }
         self.registers[0] = 0;
     }
-    fn step_inner(&mut self) {
+    fn handle_exception(&mut self, exception: Exception) {
+        match exception {
+            Exception::InstructionAddressMisaligned { pc } => {
+                self.csrs.write_exception(pc, 0, 0);
+            },
+            Exception::IllegalInstruction { pc, instruction } => {
+                self.csrs.write_exception(pc, 2, instruction as u64);
+            },
+            Exception::Breakpoint { pc } => {
+                panic!("EBREAK: 0x{pc:x}");
+            },
+            Exception::LoadAccessFault { pc, addr } => {
+                self.csrs.write_exception(pc, 5, addr);
+            },
+            Exception::StoreAccessFault { pc, addr } => {
+                self.csrs.write_exception(pc, 7, addr);
+            },
+        }
+        self.pc = self.csrs.mtvec();
+    }
+    fn step_inner(&mut self) -> Option<Exception> {
         let instruction = self.mem.read_word(self.pc);
 
         let opcode = instruction & 0b111_1111;
@@ -79,15 +128,17 @@ impl Cpu {
                 let decoded = JType::decode(instruction);
                 self.registers[decoded.rd as usize] = self.pc.wrapping_add(4);
                 self.pc = self.pc.wrapping_add(sext32(decoded.imm));
+                return None;
             }
             0b1100111 => { // JALR
                 let decoded = IType::decode(instruction);
                 if decoded.funct3 != 0 {
-                    panic!("invalid funct3 for JALR instruction");
+                    return Some(Exception::IllegalInstruction { pc: self.pc, instruction });
                 }
                 let target = self.registers[decoded.rs1 as usize].wrapping_add(sext32(decoded.imm)) & (!1);
                 self.registers[decoded.rd as usize] = self.pc.wrapping_add(4);
                 self.pc = target;
+                return None;
             }
             0b1100011 => { // branch
                 let decoded = BType::decode(instruction);
@@ -113,10 +164,11 @@ impl Cpu {
                     7 => { // BGEU
                         src1 >= src2
                     }
-                    _ => panic!("invalid funct3 for branch instruction")
+                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                 };
                 if branch {
                     self.pc = target;
+                    return None;
                 }
             }
             0b0000011 => { // loads
@@ -144,7 +196,7 @@ impl Cpu {
                     6 => { // LWU
                         self.mem.read_word(addr) as u64
                     }
-                    _ => panic!("invalid funct3 for load instruction")
+                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                 };
                 self.registers[decoded.rd as usize] = val;
             }
@@ -165,7 +217,7 @@ impl Cpu {
                     3 => { // SD
                         self.mem.write_dword(addr, val);
                     }
-                    _ => panic!("invalid funct3 for store instruction")
+                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                 }
             }
             0b0010011 => { // register-immediate alu ops
@@ -178,7 +230,7 @@ impl Cpu {
                     }
                     1 => { // SLLI
                         if decoded.imm >= 64 {
-                            panic!("invalid shamt for SLLI instruction")
+                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                         }
                         *reg = val << decoded.imm;
                     }
@@ -195,7 +247,7 @@ impl Cpu {
                         let is_arith = (decoded.imm & 0b100_0000_0000) != 0;
                         let shamt = decoded.imm & (!0b100_0000_0000);
                         if shamt >= 64 {
-                            panic!("invalid shamt for SRLI/SRAI instruction")
+                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                         }
                         if is_arith {
                             *reg = ((val as i64) >> decoded.imm) as u64;
@@ -209,7 +261,7 @@ impl Cpu {
                     7 => { // ANDI
                         *reg = val & sext32(decoded.imm);
                     }
-                    _ => panic!("invalid funct3 for register-immediate alu op")
+                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                 }
             }
             0b0011011 => { // 32-bit register-immediate alu ops
@@ -222,7 +274,7 @@ impl Cpu {
                     }
                     1 => { // SLLIW
                         if decoded.imm >= 32 {
-                            panic!("invalid shamt for SLLIW instruction")
+                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                         }
                         *reg = sext32(val << decoded.imm);
                     }
@@ -230,7 +282,7 @@ impl Cpu {
                         let is_arith = (decoded.imm & 0b100_0000_0000) != 0;
                         let shamt = decoded.imm & (!0b100_0000_0000);
                         if shamt >= 32 {
-                            panic!("invalid shamt for SRLI/SRAI instruction")
+                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                         }
                         if is_arith {
                             *reg = sext32(((val as i32) >> decoded.imm) as u32);
@@ -238,7 +290,7 @@ impl Cpu {
                             *reg = sext32(val >> decoded.imm);
                         }
                     }
-                    _ => panic!("invalid funct3 for 32-bit register-immediate alu op")
+                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                 }
             }
             0b0110011 => { // register-register alu ops
@@ -278,7 +330,7 @@ impl Cpu {
                         *reg = src1 & src2;
                     }
                     (_, _) => {
-                        panic!("invalid funct3 + funct7 combo for register-register alu op")
+                        return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                     }
                 }
             }
@@ -304,19 +356,59 @@ impl Cpu {
                         *reg = sext32(((src1 as i32) >> (src2 & 0b1_1111)) as u32);
                     }
                     (_, _) => {
-                        panic!("invalid funct3 + funct7 combo for 32-bit register-register alu op")
+                        return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                     }
                 }
             }
             0b0001111 => {} // fence stuff which is a NOP in this emulator
-            0b1110011 => { // ECALL + EBREAK
-                panic!("ECALL/EBREAK executed. instruction: {opcode:b}")
+            0b1110011 => { // ECALL + EBREAK + Zicsr stuff
+                let mut decoded = IType::decode(instruction);
+                decoded.imm &= 0b1111_1111_1111;
+                let val = self.registers[decoded.rs1 as usize];
+                let reg = &mut self.registers[decoded.rd as usize];
+                let csr = &mut self.csrs.inner[decoded.imm as usize];
+                match decoded.funct3 {
+                    0 => {
+                        if instruction == 0b00110000001000000000000001110011 {
+                            self.pc = self.csrs.inner[0x341];
+                            return None;
+                        }
+                        panic!("ECALL/EBREAK executed. pc: {:x} instruction: {opcode:b}", self.pc)
+                    }
+                    1 => { // CSRRW
+                        *reg = *csr;
+                        *csr = val;
+                    }
+                    2 => { // CSRRS
+                        *reg = *csr;
+                        *csr |= val;
+                    }
+                    3 => { // CSRRC
+                        *reg = *csr;
+                        *csr &= !val;
+                    }
+                    5 => { // CSRRWI
+                        *reg = *csr;
+                        *csr = decoded.rs1 as u64;
+                    }
+                    6 => { // CSRRSI
+                        *reg = *csr;
+                        *csr |= decoded.rs1 as u64;
+                    }
+                    7 => { // CSRRCI
+                        *reg = *csr;
+                        *csr &= !(decoded.rs1 as u64);
+                    }
+                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                }
             }
             _ => {
-                panic!("invalid opcode")
+                return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
             }
         }
 
         self.pc += 4;
+        
+        None
     }
 }
