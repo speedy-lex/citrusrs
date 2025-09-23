@@ -36,7 +36,7 @@ impl Memory {
         u64::from_le_bytes([self.read_byte(addr), self.read_byte(addr.wrapping_add(1)), self.read_byte(addr.wrapping_add(2)), self.read_byte(addr.wrapping_add(3)), self.read_byte(addr.wrapping_add(4)), self.read_byte(addr.wrapping_add(5)), self.read_byte(addr.wrapping_add(6)), self.read_byte(addr.wrapping_add(7))])
     }
     pub fn write_byte(&mut self, addr: u64, val: u8) {
-        self.mem[addr as usize] = val
+        self.mem[addr as usize - 0x80000000] = val
     }
     pub fn write_hword(&mut self, addr: u64, val: u16) {
         for (i, byte) in val.to_le_bytes().into_iter().enumerate() {
@@ -65,16 +65,17 @@ fn sext32(x: u32) -> u64 {
     x as i32 as i64 as u64
 }
 
-enum Exception {
+pub enum Exception {
     InstructionAddressMisaligned { pc: u64 },
     IllegalInstruction { pc: u64, instruction: u32 },
     Breakpoint { pc: u64 },
     LoadAccessFault { pc: u64, addr: u64 },
     StoreAccessFault { pc: u64, addr: u64 },
+    Ecall { pc: u64 },
 }
 
 pub struct Cpu {
-    registers: [u64; 32],
+    pub registers: [u64; 32],
     pub pc: u64,
     csrs: Csrs,
     mem: Memory,
@@ -83,29 +84,42 @@ impl Cpu {
     pub fn new(mem: Vec<u8>) -> Cpu {
         Self { registers: [0; 32], pc: 0, mem: Memory { mem }, csrs: Csrs::new() }
     }
-    pub fn step(&mut self) {
+    /// returns all ECALL/EBREAK exceptions
+    pub fn step(&mut self) -> Option<Exception> {
         let exception = self.step_inner();
-        if let Some(exception) = exception {
-            self.handle_exception(exception);
-        }
+        let ret = match exception {
+            Some(Exception::Ecall { pc }) => {
+                self.handle_exception(Exception::Ecall { pc });
+                Some(Exception::Ecall { pc })
+            }
+            Some(exception) => {
+                self.handle_exception(exception);
+                None
+            }
+            None => None
+        };
         self.registers[0] = 0;
+        ret
     }
     fn handle_exception(&mut self, exception: Exception) {
         match exception {
             Exception::InstructionAddressMisaligned { pc } => {
-                self.csrs.write_exception(pc, 0, 0);
-            },
+                        self.csrs.write_exception(pc, 0, 0);
+                    },
             Exception::IllegalInstruction { pc, instruction } => {
-                self.csrs.write_exception(pc, 2, instruction as u64);
-            },
+                        self.csrs.write_exception(pc, 2, instruction as u64);
+                    },
             Exception::Breakpoint { pc } => {
-                panic!("EBREAK: 0x{pc:x}");
-            },
+                        panic!("EBREAK: 0x{pc:x}");
+                    },
             Exception::LoadAccessFault { pc, addr } => {
-                self.csrs.write_exception(pc, 5, addr);
-            },
+                        self.csrs.write_exception(pc, 5, addr);
+                    },
             Exception::StoreAccessFault { pc, addr } => {
-                self.csrs.write_exception(pc, 7, addr);
+                        self.csrs.write_exception(pc, 7, addr);
+                    },
+            Exception::Ecall { pc } => {
+                self.csrs.write_exception(pc, 0, 0); // needs rework
             },
         }
         self.pc = self.csrs.mtvec();
@@ -250,9 +264,9 @@ impl Cpu {
                             return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                         }
                         if is_arith {
-                            *reg = ((val as i64) >> decoded.imm) as u64;
+                            *reg = ((val as i64) >> shamt) as u64;
                         } else {
-                            *reg = val >> decoded.imm;
+                            *reg = val >> shamt;
                         }
                     }
                     6 => { // ORI
@@ -285,9 +299,9 @@ impl Cpu {
                             return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
                         }
                         if is_arith {
-                            *reg = sext32(((val as i32) >> decoded.imm) as u32);
+                            *reg = sext32(((val as i32) >> shamt) as u32);
                         } else {
-                            *reg = sext32(val >> decoded.imm);
+                            *reg = sext32(val >> shamt);
                         }
                     }
                     _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
@@ -373,7 +387,7 @@ impl Cpu {
                             self.pc = self.csrs.inner[0x341];
                             return None;
                         }
-                        panic!("ECALL/EBREAK executed. pc: {:x} instruction: {opcode:b}", self.pc)
+                        return Some(Exception::Ecall { pc: self.pc });
                     }
                     1 => { // CSRRW
                         *reg = *csr;

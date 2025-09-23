@@ -1,8 +1,6 @@
 use std::fs;
 
-use crate::cpu::Cpu;
-
-mod cpu;
+use citrusrs::Cpu;
 
 fn main() {
     let file = fs::read("rom.elf").unwrap();
