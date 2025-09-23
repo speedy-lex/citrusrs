@@ -34,7 +34,7 @@ impl IType {
             rd: ((x >> 7) & 0b1_1111) as u8,
             rs1: ((x >> 15) & 0b1_1111) as u8,
             funct3: ((x >> 12) & 0b111) as u8,
-            imm: sext(x >> 20, 12)
+            imm: sext(x >> 20, 12),
         }
     }
 }
@@ -51,7 +51,7 @@ impl SType {
             rs1: ((x >> 15) & 0b1_1111) as u8,
             rs2: ((x >> 20) & 0b1_1111) as u8,
             funct3: ((x >> 12) & 0b111) as u8,
-            imm: sext(((x >> 20) & 0b1111_1110_0000) | ((x >> 7) & 0b1_1111), 12)
+            imm: sext(((x >> 20) & 0b1111_1110_0000) | ((x >> 7) & 0b1_1111), 12),
         }
     }
 }
@@ -63,7 +63,8 @@ pub struct BType {
 }
 impl BType {
     pub const fn decode(x: u32) -> Self {
-        let mut imm = 
+        #[rustfmt::skip]
+        let mut imm =
             (x >> 7)  & 0b0_0000_0001_1110 |
             (x >> 20) & 0b0_0111_1110_0000 |
             (x << 4)  & 0b0_1000_0000_0000 |
@@ -73,7 +74,7 @@ impl BType {
             rs1: ((x >> 15) & 0b1_1111) as u8,
             rs2: ((x >> 20) & 0b1_1111) as u8,
             funct3: ((x >> 12) & 0b111) as u8,
-            imm
+            imm,
         }
     }
 }
@@ -86,7 +87,7 @@ impl UType {
     pub const fn decode(x: u32) -> Self {
         Self {
             rd: ((x >> 7) & 0b1_1111) as u8,
-            imm: x & 0xffff_f000
+            imm: x & 0xffff_f000,
         }
     }
 }
@@ -97,7 +98,8 @@ pub struct JType {
 }
 impl JType {
     pub const fn decode(x: u32) -> Self {
-        let mut imm = 
+        #[rustfmt::skip]
+        let mut imm =
             (x >> 20) & 0b0_0000_0000_0111_1111_1110 |
             (x >> 9)  & 0b0_0000_0000_1000_0000_0000 |
              x        & 0b0_1111_1111_0000_0000_0000 |
@@ -105,7 +107,7 @@ impl JType {
         imm = sext(imm, 21);
         Self {
             rd: ((x >> 7) & 0b1_1111) as u8,
-            imm
+            imm,
         }
     }
 }

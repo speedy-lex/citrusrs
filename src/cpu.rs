@@ -30,10 +30,24 @@ impl Memory {
         u16::from_le_bytes([self.read_byte(addr), self.read_byte(addr.wrapping_add(1))])
     }
     pub fn read_word(&mut self, addr: u64) -> u32 {
-        u32::from_le_bytes([self.read_byte(addr), self.read_byte(addr.wrapping_add(1)), self.read_byte(addr.wrapping_add(2)), self.read_byte(addr.wrapping_add(3))])
+        u32::from_le_bytes([
+            self.read_byte(addr),
+            self.read_byte(addr.wrapping_add(1)),
+            self.read_byte(addr.wrapping_add(2)),
+            self.read_byte(addr.wrapping_add(3)),
+        ])
     }
     pub fn read_dword(&mut self, addr: u64) -> u64 {
-        u64::from_le_bytes([self.read_byte(addr), self.read_byte(addr.wrapping_add(1)), self.read_byte(addr.wrapping_add(2)), self.read_byte(addr.wrapping_add(3)), self.read_byte(addr.wrapping_add(4)), self.read_byte(addr.wrapping_add(5)), self.read_byte(addr.wrapping_add(6)), self.read_byte(addr.wrapping_add(7))])
+        u64::from_le_bytes([
+            self.read_byte(addr),
+            self.read_byte(addr.wrapping_add(1)),
+            self.read_byte(addr.wrapping_add(2)),
+            self.read_byte(addr.wrapping_add(3)),
+            self.read_byte(addr.wrapping_add(4)),
+            self.read_byte(addr.wrapping_add(5)),
+            self.read_byte(addr.wrapping_add(6)),
+            self.read_byte(addr.wrapping_add(7)),
+        ])
     }
     pub fn write_byte(&mut self, addr: u64, val: u8) {
         self.mem[addr as usize - 0x80000000] = val
@@ -82,7 +96,12 @@ pub struct Cpu {
 }
 impl Cpu {
     pub fn new(mem: Vec<u8>) -> Cpu {
-        Self { registers: [0; 32], pc: 0, mem: Memory { mem }, csrs: Csrs::new() }
+        Self {
+            registers: [0; 32],
+            pc: 0,
+            mem: Memory { mem },
+            csrs: Csrs::new(),
+        }
     }
     /// returns all ECALL/EBREAK exceptions
     pub fn step(&mut self) -> Option<Exception> {
@@ -96,7 +115,7 @@ impl Cpu {
                 self.handle_exception(exception);
                 None
             }
-            None => None
+            None => None,
         };
         self.registers[0] = 0;
         ret
@@ -104,23 +123,23 @@ impl Cpu {
     fn handle_exception(&mut self, exception: Exception) {
         match exception {
             Exception::InstructionAddressMisaligned { pc } => {
-                        self.csrs.write_exception(pc, 0, 0);
-                    },
+                self.csrs.write_exception(pc, 0, 0);
+            }
             Exception::IllegalInstruction { pc, instruction } => {
-                        self.csrs.write_exception(pc, 2, instruction as u64);
-                    },
+                self.csrs.write_exception(pc, 2, instruction as u64);
+            }
             Exception::Breakpoint { pc } => {
-                        panic!("EBREAK: 0x{pc:x}");
-                    },
+                panic!("EBREAK: 0x{pc:x}");
+            }
             Exception::LoadAccessFault { pc, addr } => {
-                        self.csrs.write_exception(pc, 5, addr);
-                    },
+                self.csrs.write_exception(pc, 5, addr);
+            }
             Exception::StoreAccessFault { pc, addr } => {
-                        self.csrs.write_exception(pc, 7, addr);
-                    },
+                self.csrs.write_exception(pc, 7, addr);
+            }
             Exception::Ecall { pc } => {
                 self.csrs.write_exception(pc, 0, 0); // needs rework
-            },
+            }
         }
         self.pc = self.csrs.mtvec();
     }
@@ -130,138 +149,194 @@ impl Cpu {
         let opcode = instruction & 0b111_1111;
 
         match opcode {
-            0b0110111 => { // LUI
+            0b0110111 => {
+                // LUI
                 let decoded = UType::decode(instruction);
                 self.registers[decoded.rd as usize] = sext32(decoded.imm);
             }
-            0b0010111 => { // AUIPC
+            0b0010111 => {
+                // AUIPC
                 let decoded = UType::decode(instruction);
                 self.registers[decoded.rd as usize] = self.pc.wrapping_add(sext32(decoded.imm));
             }
-            0b1101111 => { // JAL
+            0b1101111 => {
+                // JAL
                 let decoded = JType::decode(instruction);
                 self.registers[decoded.rd as usize] = self.pc.wrapping_add(4);
                 self.pc = self.pc.wrapping_add(sext32(decoded.imm));
                 return None;
             }
-            0b1100111 => { // JALR
+            0b1100111 => {
+                // JALR
                 let decoded = IType::decode(instruction);
                 if decoded.funct3 != 0 {
-                    return Some(Exception::IllegalInstruction { pc: self.pc, instruction });
+                    return Some(Exception::IllegalInstruction {
+                        pc: self.pc,
+                        instruction,
+                    });
                 }
-                let target = self.registers[decoded.rs1 as usize].wrapping_add(sext32(decoded.imm)) & (!1);
+                let target =
+                    self.registers[decoded.rs1 as usize].wrapping_add(sext32(decoded.imm)) & (!1);
                 self.registers[decoded.rd as usize] = self.pc.wrapping_add(4);
                 self.pc = target;
                 return None;
             }
-            0b1100011 => { // branch
+            0b1100011 => {
+                // branch
                 let decoded = BType::decode(instruction);
                 let src1 = self.registers[decoded.rs1 as usize];
                 let src2 = self.registers[decoded.rs2 as usize];
                 let target = self.pc.wrapping_add(sext32(decoded.imm));
                 let branch = match decoded.funct3 {
-                    0 => { // BEQ
+                    0 => {
+                        // BEQ
                         src1 == src2
                     }
-                    1 => { // BNE
+                    1 => {
+                        // BNE
                         src1 != src2
                     }
-                    4 => { // BLT
+                    4 => {
+                        // BLT
                         (src1 as i64) < (src2 as i64)
                     }
-                    5 => { // BGE
+                    5 => {
+                        // BGE
                         (src1 as i64) >= (src2 as i64)
                     }
-                    6 => { // BLTU
+                    6 => {
+                        // BLTU
                         src1 < src2
                     }
-                    7 => { // BGEU
+                    7 => {
+                        // BGEU
                         src1 >= src2
                     }
-                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                    _ => {
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
                 };
                 if branch {
                     self.pc = target;
                     return None;
                 }
             }
-            0b0000011 => { // loads
+            0b0000011 => {
+                // loads
                 let decoded = IType::decode(instruction);
                 let addr = self.registers[decoded.rs1 as usize].wrapping_add(sext32(decoded.imm));
                 let val = match decoded.funct3 {
-                    0 => { // LB
+                    0 => {
+                        // LB
                         sext8(self.mem.read_byte(addr))
                     }
-                    1 => { // LH
+                    1 => {
+                        // LH
                         sext16(self.mem.read_hword(addr))
                     }
-                    2 => { // LW
+                    2 => {
+                        // LW
                         sext32(self.mem.read_word(addr))
                     }
-                    3 => { // LD
+                    3 => {
+                        // LD
                         self.mem.read_dword(addr)
                     }
-                    4 => { // LBU
+                    4 => {
+                        // LBU
                         self.mem.read_byte(addr) as u64
                     }
-                    5 => { // LHU
+                    5 => {
+                        // LHU
                         self.mem.read_hword(addr) as u64
                     }
-                    6 => { // LWU
+                    6 => {
+                        // LWU
                         self.mem.read_word(addr) as u64
                     }
-                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                    _ => {
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
                 };
                 self.registers[decoded.rd as usize] = val;
             }
-            0b0100011 => { // stores
+            0b0100011 => {
+                // stores
                 let decoded = SType::decode(instruction);
                 let addr = self.registers[decoded.rs1 as usize].wrapping_add(sext32(decoded.imm));
                 let val = self.registers[decoded.rs2 as usize];
                 match decoded.funct3 {
-                    0 => { // SB
+                    0 => {
+                        // SB
                         self.mem.write_byte(addr, val as u8);
                     }
-                    1 => { // SH
+                    1 => {
+                        // SH
                         self.mem.write_hword(addr, val as u16);
                     }
-                    2 => { // SW
+                    2 => {
+                        // SW
                         self.mem.write_word(addr, val as u32);
                     }
-                    3 => { // SD
+                    3 => {
+                        // SD
                         self.mem.write_dword(addr, val);
                     }
-                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                    _ => {
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
                 }
             }
-            0b0010011 => { // register-immediate alu ops
+            0b0010011 => {
+                // register-immediate alu ops
                 let decoded = IType::decode(instruction);
                 let val = self.registers[decoded.rs1 as usize];
                 let reg = &mut self.registers[decoded.rd as usize];
                 match decoded.funct3 {
-                    0 => { // ADDI
+                    0 => {
+                        // ADDI
                         *reg = val.wrapping_add(sext32(decoded.imm));
                     }
-                    1 => { // SLLI
+                    1 => {
+                        // SLLI
                         if decoded.imm >= 64 {
-                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                            return Some(Exception::IllegalInstruction {
+                                pc: self.pc,
+                                instruction,
+                            });
                         }
                         *reg = val << decoded.imm;
                     }
-                    2 => { // SLTI 
+                    2 => {
+                        // SLTI
                         *reg = ((val as i64) < (sext32(decoded.imm) as i64)) as u64
                     }
-                    3 => { // SLTIU
+                    3 => {
+                        // SLTIU
                         *reg = (val < sext32(decoded.imm)) as u64
                     }
-                    4 => { // XORI
+                    4 => {
+                        // XORI
                         *reg = val ^ sext32(decoded.imm);
                     }
-                    5 => { // SRLI + SRAI
+                    5 => {
+                        // SRLI + SRAI
                         let is_arith = (decoded.imm & 0b100_0000_0000) != 0;
                         let shamt = decoded.imm & (!0b100_0000_0000);
                         if shamt >= 64 {
-                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                            return Some(Exception::IllegalInstruction {
+                                pc: self.pc,
+                                instruction,
+                            });
                         }
                         if is_arith {
                             *reg = ((val as i64) >> shamt) as u64;
@@ -269,34 +344,51 @@ impl Cpu {
                             *reg = val >> shamt;
                         }
                     }
-                    6 => { // ORI
+                    6 => {
+                        // ORI
                         *reg = val | sext32(decoded.imm);
                     }
-                    7 => { // ANDI
+                    7 => {
+                        // ANDI
                         *reg = val & sext32(decoded.imm);
                     }
-                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                    _ => {
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
                 }
             }
-            0b0011011 => { // 32-bit register-immediate alu ops
+            0b0011011 => {
+                // 32-bit register-immediate alu ops
                 let decoded = IType::decode(instruction);
                 let val = self.registers[decoded.rs1 as usize] as u32;
                 let reg = &mut self.registers[decoded.rd as usize];
                 match decoded.funct3 {
-                    0 => { // ADDIW
+                    0 => {
+                        // ADDIW
                         *reg = sext32(val.wrapping_add(decoded.imm))
                     }
-                    1 => { // SLLIW
+                    1 => {
+                        // SLLIW
                         if decoded.imm >= 32 {
-                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                            return Some(Exception::IllegalInstruction {
+                                pc: self.pc,
+                                instruction,
+                            });
                         }
                         *reg = sext32(val << decoded.imm);
                     }
-                    5 => { // SRLIW + SRAIW
+                    5 => {
+                        // SRLIW + SRAIW
                         let is_arith = (decoded.imm & 0b100_0000_0000) != 0;
                         let shamt = decoded.imm & (!0b100_0000_0000);
                         if shamt >= 32 {
-                            return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                            return Some(Exception::IllegalInstruction {
+                                pc: self.pc,
+                                instruction,
+                            });
                         }
                         if is_arith {
                             *reg = sext32(((val as i32) >> shamt) as u32);
@@ -304,78 +396,107 @@ impl Cpu {
                             *reg = sext32(val >> shamt);
                         }
                     }
-                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                    _ => {
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
                 }
             }
-            0b0110011 => { // register-register alu ops
+            0b0110011 => {
+                // register-register alu ops
                 let decoded = RType::decode(instruction);
                 let src1 = self.registers[decoded.rs1 as usize];
                 let src2 = self.registers[decoded.rs2 as usize];
                 let reg = &mut self.registers[decoded.rd as usize];
                 match (decoded.funct7, decoded.funct3) {
-                    (0, 0) => { // ADD
+                    (0, 0) => {
+                        // ADD
                         *reg = src1.wrapping_add(src2);
                     }
-                    (0b0100000, 0) => { // SUB
+                    (0b0100000, 0) => {
+                        // SUB
                         *reg = src1.wrapping_sub(src2);
                     }
-                    (0, 1) => { // SLL
+                    (0, 1) => {
+                        // SLL
                         *reg = src1 << (src2 & 0b11_1111);
                     }
-                    (0, 2) => { // SLT
+                    (0, 2) => {
+                        // SLT
                         *reg = ((src1 as i64) < (src2 as i64)) as u64;
                     }
-                    (0, 3) => { // SLTU
+                    (0, 3) => {
+                        // SLTU
                         *reg = (src1 < src2) as u64;
                     }
-                    (0, 4) => { // XOR
+                    (0, 4) => {
+                        // XOR
                         *reg = src1 ^ src2;
                     }
-                    (0, 5) => { // SRL
+                    (0, 5) => {
+                        // SRL
                         *reg = src1 >> (src2 & 0b11_1111);
                     }
-                    (0b0100000, 5) => { // SRA
+                    (0b0100000, 5) => {
+                        // SRA
                         *reg = ((src1 as i64) >> (src2 & 0b11_1111)) as u64;
                     }
-                    (0, 6) => { // OR
+                    (0, 6) => {
+                        // OR
                         *reg = src1 | src2;
                     }
-                    (0, 7) => { // AND
+                    (0, 7) => {
+                        // AND
                         *reg = src1 & src2;
                     }
                     (_, _) => {
-                        return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
                     }
                 }
             }
-            0b0111011 => { // 32-bit register-register alu ops
+            0b0111011 => {
+                // 32-bit register-register alu ops
                 let decoded = RType::decode(instruction);
                 let src1 = self.registers[decoded.rs1 as usize] as u32;
                 let src2 = self.registers[decoded.rs2 as usize] as u32;
                 let reg = &mut self.registers[decoded.rd as usize];
                 match (decoded.funct7, decoded.funct3) {
-                    (0, 0) => { // ADDW
+                    (0, 0) => {
+                        // ADDW
                         *reg = sext32(src1.wrapping_add(src2));
                     }
-                    (0b0100000, 0) => { // SUBW
+                    (0b0100000, 0) => {
+                        // SUBW
                         *reg = sext32(src1.wrapping_sub(src2));
                     }
-                    (0, 1) => { // SLLW
+                    (0, 1) => {
+                        // SLLW
                         *reg = sext32(src1 << (src2 & 0b1_1111));
                     }
-                    (0, 5) => { // SRLW
+                    (0, 5) => {
+                        // SRLW
                         *reg = sext32(src1 >> (src2 & 0b1_1111));
                     }
-                    (0b0100000, 5) => { // SRAW
+                    (0b0100000, 5) => {
+                        // SRAW
                         *reg = sext32(((src1 as i32) >> (src2 & 0b1_1111)) as u32);
                     }
                     (_, _) => {
-                        return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
                     }
                 }
             }
             0b0001111 => {} // fence stuff which is a NOP in this emulator
-            0b1110011 => { // ECALL + EBREAK + Zicsr stuff
+            0b1110011 => {
+                // ECALL + EBREAK + Zicsr stuff
                 let mut decoded = IType::decode(instruction);
                 decoded.imm &= 0b1111_1111_1111;
                 let val = self.registers[decoded.rs1 as usize];
@@ -389,40 +510,54 @@ impl Cpu {
                         }
                         return Some(Exception::Ecall { pc: self.pc });
                     }
-                    1 => { // CSRRW
+                    1 => {
+                        // CSRRW
                         *reg = *csr;
                         *csr = val;
                     }
-                    2 => { // CSRRS
+                    2 => {
+                        // CSRRS
                         *reg = *csr;
                         *csr |= val;
                     }
-                    3 => { // CSRRC
+                    3 => {
+                        // CSRRC
                         *reg = *csr;
                         *csr &= !val;
                     }
-                    5 => { // CSRRWI
+                    5 => {
+                        // CSRRWI
                         *reg = *csr;
                         *csr = decoded.rs1 as u64;
                     }
-                    6 => { // CSRRSI
+                    6 => {
+                        // CSRRSI
                         *reg = *csr;
                         *csr |= decoded.rs1 as u64;
                     }
-                    7 => { // CSRRCI
+                    7 => {
+                        // CSRRCI
                         *reg = *csr;
                         *csr &= !(decoded.rs1 as u64);
                     }
-                    _ => return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                    _ => {
+                        return Some(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
                 }
             }
             _ => {
-                return Some(Exception::IllegalInstruction { pc: self.pc, instruction })
+                return Some(Exception::IllegalInstruction {
+                    pc: self.pc,
+                    instruction,
+                });
             }
         }
 
         self.pc += 4;
-        
+
         None
     }
 }

@@ -14,7 +14,8 @@ fn basic_roms() {
                 if header.p_memsz == 0 {
                     continue;
                 }
-                let start = (header.vm_range().start - 0x80000000)..(header.vm_range().end - 0x80000000);
+                let start =
+                    (header.vm_range().start - 0x80000000)..(header.vm_range().end - 0x80000000);
                 mem[start].copy_from_slice(&file[header.file_range()]);
             }
             let mut cpu = Cpu::new(mem);
