@@ -5,6 +5,9 @@ mod decoder;
 #[derive(Default)]
 struct Csrs {
     mtvec: u64,
+
+    // machine trap handling
+    mscratch: u64,
     mepc: u64,
     mcause: u64,
     mtval: u64,
@@ -24,6 +27,7 @@ impl Csrs {
     fn read(&mut self, addr: u64) -> u64 {
         match addr {
             0x305 => self.mtvec,
+            0x340 => self.mscratch,
             0x341 => self.mepc,
             0x342 => self.mcause,
             0x343 => self.mtval,
@@ -32,6 +36,9 @@ impl Csrs {
     }
     fn write(&mut self, addr: u64, val: u64) {
         match addr {
+            0x340 => {
+                self.mscratch = val;
+            }
             0x305 => {
                 self.mtvec = val;
             }
