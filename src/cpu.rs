@@ -23,20 +23,11 @@ impl Csrs {
     }
     fn read(&mut self, addr: u64) -> u64 {
         match addr {
-            0x305 => {
-                // mtvec
-                self.mtvec
-            }
-            0x341 => {
-                self.mepc
-            }
-            0x342 => {
-                self.mcause
-            }
-            0x343 => {
-                self.mtval
-            }
-            _ => 0
+            0x305 => self.mtvec,
+            0x341 => self.mepc,
+            0x342 => self.mcause,
+            0x343 => self.mtval,
+            _ => 0,
         }
     }
     fn write(&mut self, addr: u64, val: u64) {
@@ -189,10 +180,16 @@ impl Cpu {
         }
         self.pc = self.csrs.mtvec();
     }
-    fn read_csr(&mut self, addr: u64, pc: u64, instruction: u32) -> Result<u64, Exception> {
+    fn read_csr(&mut self, addr: u64, _pc: u64, _instruction: u32) -> Result<u64, Exception> {
         Ok(self.csrs.read(addr))
     }
-    fn write_csr(&mut self, addr: u64, val: u64, pc: u64, instruction: u32) -> Result<(), Exception> {
+    fn write_csr(
+        &mut self,
+        addr: u64,
+        val: u64,
+        pc: u64,
+        instruction: u32,
+    ) -> Result<(), Exception> {
         if addr & 0b1100_0000_0000 == 0b1100_0000_0000 {
             return Err(Exception::IllegalInstruction { pc, instruction });
         }
@@ -567,43 +564,76 @@ impl Cpu {
                     1 => {
                         // CSRRW
                         if decoded.rd != 0 {
-                            self.registers[decoded.rd as usize] = self.read_csr(csr, self.pc, instruction)?;
+                            self.registers[decoded.rd as usize] =
+                                self.read_csr(csr, self.pc, instruction)?;
                         }
-                        self.write_csr(csr, self.registers[decoded.rs1 as usize], self.pc, instruction)?;
+                        self.write_csr(
+                            csr,
+                            self.registers[decoded.rs1 as usize],
+                            self.pc,
+                            instruction,
+                        )?;
                     }
                     2 => {
                         // CSRRS
-                        self.registers[decoded.rd as usize] = self.read_csr(csr, self.pc, instruction)?;
+                        self.registers[decoded.rd as usize] =
+                            self.read_csr(csr, self.pc, instruction)?;
                         if decoded.rs1 != 0 {
-                            self.write_csr(csr, self.registers[decoded.rd as usize] | self.registers[decoded.rs1 as usize], self.pc, instruction)?;
+                            self.write_csr(
+                                csr,
+                                self.registers[decoded.rd as usize]
+                                    | self.registers[decoded.rs1 as usize],
+                                self.pc,
+                                instruction,
+                            )?;
                         }
                     }
                     3 => {
                         // CSRRC
-                        self.registers[decoded.rd as usize] = self.read_csr(csr, self.pc, instruction)?;
+                        self.registers[decoded.rd as usize] =
+                            self.read_csr(csr, self.pc, instruction)?;
                         if decoded.rs1 != 0 {
-                            self.write_csr(csr, self.registers[decoded.rd as usize] & !self.registers[decoded.rs1 as usize], self.pc, instruction)?;
+                            self.write_csr(
+                                csr,
+                                self.registers[decoded.rd as usize]
+                                    & !self.registers[decoded.rs1 as usize],
+                                self.pc,
+                                instruction,
+                            )?;
                         }
                     }
                     5 => {
                         // CSRRWI
                         if decoded.rd != 0 {
-                            self.registers[decoded.rd as usize] = self.read_csr(csr, self.pc, instruction)?;
+                            self.registers[decoded.rd as usize] =
+                                self.read_csr(csr, self.pc, instruction)?;
                         }
                         self.write_csr(csr, decoded.rs1 as u64, self.pc, instruction)?;
                     }
                     6 => {
                         // CSRRSI
-                        self.registers[decoded.rd as usize] = self.read_csr(csr, self.pc, instruction)?;
+                        self.registers[decoded.rd as usize] =
+                            self.read_csr(csr, self.pc, instruction)?;
                         if decoded.rs1 != 0 {
-                            self.write_csr(csr, self.registers[decoded.rd as usize] | decoded.rs1 as u64, self.pc, instruction)?;
+                            self.write_csr(
+                                csr,
+                                self.registers[decoded.rd as usize] | decoded.rs1 as u64,
+                                self.pc,
+                                instruction,
+                            )?;
                         }
                     }
                     7 => {
                         // CSRRCI
-                        self.registers[decoded.rd as usize] = self.read_csr(csr, self.pc, instruction)?;
+                        self.registers[decoded.rd as usize] =
+                            self.read_csr(csr, self.pc, instruction)?;
                         if decoded.rs1 != 0 {
-                            self.write_csr(csr, self.registers[decoded.rd as usize] & !decoded.rs1 as u64, self.pc, instruction)?;
+                            self.write_csr(
+                                csr,
+                                self.registers[decoded.rd as usize] & !decoded.rs1 as u64,
+                                self.pc,
+                                instruction,
+                            )?;
                         }
                     }
                     _ => {
