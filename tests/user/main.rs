@@ -3,8 +3,8 @@ use std::fs;
 use citrusrs::Cpu;
 
 #[test]
-fn basic_roms() {
-    for rom in fs::read_dir("tests/basic_roms/roms").unwrap() {
+fn run_user_roms() {
+    for rom in fs::read_dir("tests/user/roms").unwrap() {
         let rom = rom.unwrap();
         if rom.file_type().unwrap().is_file() {
             let file = fs::read(rom.path()).unwrap();
@@ -23,7 +23,7 @@ fn basic_roms() {
             // check x10 for error
             while cpu.step().is_none() {}
             let errcode = cpu.registers[10];
-            assert_eq!(errcode, 0)
+            assert_eq!(errcode, 0, "{}", rom.file_name().to_string_lossy())
         }
     }
 }
