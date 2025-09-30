@@ -21,9 +21,13 @@ fn run_machine_roms() {
             let mut cpu = Cpu::new(mem);
             cpu.pc = elf.entry;
             // check x10 for error
-            while cpu.step().is_none() {}
+            let mut cycles = 0;
+            while cpu.step().is_none() && cycles < 1000000 {
+                cycles += 1;
+            }
+            assert_ne!(cycles, 1000000, "pc: 0x{:x}, test failed: {}", cpu.pc, rom.file_name().to_string_lossy());
             let errcode = cpu.registers[10];
-            assert_eq!(errcode, 0, "{}", rom.file_name().to_string_lossy())
+            assert_eq!(errcode, 0, "{}, mscratch: 0x{:x}, test failed: {}", rom.file_name().to_string_lossy(), cpu.csrs.mscratch, (errcode & !1) >> 1)
         }
     }
 }

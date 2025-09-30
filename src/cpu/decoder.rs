@@ -3,6 +3,7 @@ pub const fn sext(x: u32, bits: u8) -> u32 {
     (((x << shift) as i32) >> shift) as u32
 }
 
+#[derive(Debug)]
 pub struct RType {
     pub rd: u8,
     pub rs1: u8,
@@ -22,6 +23,7 @@ impl RType {
     }
 }
 
+#[derive(Debug)]
 pub struct IType {
     pub rd: u8,
     pub rs1: u8,
@@ -39,6 +41,7 @@ impl IType {
     }
 }
 
+#[derive(Debug)]
 pub struct SType {
     pub rs1: u8,
     pub rs2: u8,
@@ -55,6 +58,7 @@ impl SType {
         }
     }
 }
+#[derive(Debug)]
 pub struct BType {
     pub rs1: u8,
     pub rs2: u8,
@@ -79,6 +83,7 @@ impl BType {
     }
 }
 
+#[derive(Debug)]
 pub struct UType {
     pub rd: u8,
     pub imm: u32,
@@ -92,6 +97,7 @@ impl UType {
     }
 }
 
+#[derive(Debug)]
 pub struct JType {
     pub rd: u8,
     pub imm: u32,

@@ -1,62 +1,12 @@
-use crate::cpu::decoder::{BType, IType, JType, RType, SType, UType};
+use crate::cpu::{
+    csrs::Csrs,
+    decoder::{BType, IType, JType, RType, SType, UType},
+};
 
+mod csrs;
 mod decoder;
 
-#[derive(Default)]
-struct Csrs {
-    mtvec: u64,
-
-    // machine trap handling
-    mscratch: u64,
-    mepc: u64,
-    mcause: u64,
-    mtval: u64,
-}
-impl Csrs {
-    fn new() -> Self {
-        Self::default()
-    }
-    fn write_exception(&mut self, mepc: u64, mcause: u64, mtval: u64) {
-        self.mepc = mepc;
-        self.mcause = mcause;
-        self.mtval = mtval;
-    }
-    fn mtvec(&self) -> u64 {
-        self.mtvec
-    }
-    fn read(&mut self, addr: u64) -> u64 {
-        match addr {
-            0x305 => self.mtvec,
-            0x340 => self.mscratch,
-            0x341 => self.mepc,
-            0x342 => self.mcause,
-            0x343 => self.mtval,
-            _ => 0,
-        }
-    }
-    fn write(&mut self, addr: u64, val: u64) {
-        match addr {
-            0x340 => {
-                self.mscratch = val;
-            }
-            0x305 => {
-                self.mtvec = val;
-            }
-            0x341 => {
-                self.mepc = val;
-            }
-            0x342 => {
-                self.mcause = val;
-            }
-            0x343 => {
-                self.mtval = val;
-            }
-            _ => {}
-        }
-    }
-}
-
-struct Memory {
+pub struct Memory {
     mem: Vec<u8>,
 }
 impl Memory {
@@ -132,11 +82,33 @@ pub enum Exception {
     Ecall { pc: u64 },
 }
 
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Priviledge {
+    #[default]
+    Machine = 3,
+    Hypervisor = 2,
+    Supervisor = 1,
+    User = 0,
+}
+impl From<u64> for Priviledge {
+    fn from(value: u64) -> Self {
+        use Priviledge::*;
+        match value {
+            3 => Machine,
+            2 => Hypervisor,
+            1 => Supervisor,
+            0 => User,
+            _ => panic!("invalid priviledge mode: {value} should be 0-3"),
+        }
+    }
+}
+
 pub struct Cpu {
     pub registers: [u64; 32],
     pub pc: u64,
-    csrs: Csrs,
-    mem: Memory,
+    pub csrs: Csrs,
+    priviledge: Priviledge,
+    pub mem: Memory,
 }
 impl Cpu {
     pub fn new(mem: Vec<u8>) -> Cpu {
@@ -144,6 +116,7 @@ impl Cpu {
             registers: [0; 32],
             pc: 0,
             mem: Memory { mem },
+            priviledge: Priviledge::Machine,
             csrs: Csrs::new(),
         }
     }
@@ -167,27 +140,30 @@ impl Cpu {
     fn handle_exception(&mut self, exception: Exception) {
         match exception {
             Exception::InstructionAddressMisaligned { pc } => {
-                self.csrs.write_exception(pc, 0, 0);
+                self.csrs.write_exception(self.priviledge, pc, 0, 0);
             }
             Exception::IllegalInstruction { pc, instruction } => {
-                self.csrs.write_exception(pc, 2, instruction as u64);
+                self.csrs.write_exception(self.priviledge, pc, 2, instruction as u64);
             }
             Exception::Breakpoint { pc } => {
                 panic!("EBREAK: 0x{pc:x}");
             }
             Exception::LoadAccessFault { pc, addr } => {
-                self.csrs.write_exception(pc, 5, addr);
+                self.csrs.write_exception(self.priviledge, pc, 5, addr);
             }
             Exception::StoreAccessFault { pc, addr } => {
-                self.csrs.write_exception(pc, 7, addr);
+                self.csrs.write_exception(self.priviledge, pc, 7, addr);
             }
             Exception::Ecall { pc } => {
-                self.csrs.write_exception(pc, 0, 0); // needs rework
+                self.csrs.write_exception(self.priviledge, pc, 0, 0); // needs rework
             }
         }
-        self.pc = self.csrs.mtvec();
+        self.pc = self.csrs.mtvec;
     }
-    fn read_csr(&mut self, addr: u64, _pc: u64, _instruction: u32) -> Result<u64, Exception> {
+    fn read_csr(&mut self, addr: u64, pc: u64, instruction: u32) -> Result<u64, Exception> {
+        if Priviledge::from((addr & 0b0011_0000_0000) >> 8) > self.priviledge {
+            return Err(Exception::IllegalInstruction { pc, instruction });
+        }
         Ok(self.csrs.read(addr))
     }
     fn write_csr(
@@ -570,44 +546,46 @@ impl Cpu {
                     }
                     1 => {
                         // CSRRW
-                        if decoded.rd != 0 {
-                            self.registers[decoded.rd as usize] =
-                                self.read_csr(csr, self.pc, instruction)?;
-                        }
+                        let val = if decoded.rd != 0 {
+                            self.read_csr(csr, self.pc, instruction)?
+                        } else {
+                            0
+                        };
                         self.write_csr(
                             csr,
                             self.registers[decoded.rs1 as usize],
                             self.pc,
                             instruction,
                         )?;
+                        self.registers[decoded.rd as usize] = val;
                     }
                     2 => {
                         // CSRRS
-                        self.registers[decoded.rd as usize] =
-                            self.read_csr(csr, self.pc, instruction)?;
+                        let val = self.read_csr(csr, self.pc, instruction)?;
                         if decoded.rs1 != 0 {
                             self.write_csr(
                                 csr,
-                                self.registers[decoded.rd as usize]
+                                val
                                     | self.registers[decoded.rs1 as usize],
                                 self.pc,
                                 instruction,
                             )?;
                         }
+                        self.registers[decoded.rd as usize] = val;
                     }
                     3 => {
                         // CSRRC
-                        self.registers[decoded.rd as usize] =
-                            self.read_csr(csr, self.pc, instruction)?;
+                        let val = self.read_csr(csr, self.pc, instruction)?;
                         if decoded.rs1 != 0 {
                             self.write_csr(
                                 csr,
-                                self.registers[decoded.rd as usize]
+                                val
                                     & !self.registers[decoded.rs1 as usize],
                                 self.pc,
                                 instruction,
                             )?;
                         }
+                        self.registers[decoded.rd as usize] = val;
                     }
                     5 => {
                         // CSRRWI
