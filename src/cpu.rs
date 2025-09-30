@@ -143,7 +143,8 @@ impl Cpu {
                 self.csrs.write_exception(self.priviledge, pc, 0, 0);
             }
             Exception::IllegalInstruction { pc, instruction } => {
-                self.csrs.write_exception(self.priviledge, pc, 2, instruction as u64);
+                self.csrs
+                    .write_exception(self.priviledge, pc, 2, instruction as u64);
             }
             Exception::Breakpoint { pc } => {
                 panic!("EBREAK: 0x{pc:x}");
@@ -158,7 +159,7 @@ impl Cpu {
                 self.csrs.write_exception(self.priviledge, pc, 0, 0); // needs rework
             }
         }
-        self.pc = self.csrs.mtvec;
+        self.pc = self.csrs.mtvec & !0b11;
     }
     fn read_csr(&mut self, addr: u64, pc: u64, instruction: u32) -> Result<u64, Exception> {
         if Priviledge::from((addr & 0b0011_0000_0000) >> 8) > self.priviledge {
@@ -565,8 +566,7 @@ impl Cpu {
                         if decoded.rs1 != 0 {
                             self.write_csr(
                                 csr,
-                                val
-                                    | self.registers[decoded.rs1 as usize],
+                                val | self.registers[decoded.rs1 as usize],
                                 self.pc,
                                 instruction,
                             )?;
@@ -579,8 +579,7 @@ impl Cpu {
                         if decoded.rs1 != 0 {
                             self.write_csr(
                                 csr,
-                                val
-                                    & !self.registers[decoded.rs1 as usize],
+                                val & !self.registers[decoded.rs1 as usize],
                                 self.pc,
                                 instruction,
                             )?;

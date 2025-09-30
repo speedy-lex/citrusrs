@@ -21,15 +21,15 @@ impl MStatus {
     }
     pub fn decode(x: u64) -> Self {
         Self {
-            machine_disable_trap: (x >> 42) & 1 !=0,
-            trap_sret: (x >> 22) & 1 !=0,
-            timeout_wait: (x >> 21) & 1 !=0,
+            machine_disable_trap: (x >> 42) & 1 != 0,
+            trap_sret: (x >> 22) & 1 != 0,
+            timeout_wait: (x >> 21) & 1 != 0,
             machipe_previous_priviledge: Priviledge::from((x >> 11) & 0b11),
             supervisor_previous_priviledge: Priviledge::from((x >> 8) & 0b1),
-            machine_previous_interrupt_enable: (x >> 7) & 1 !=0,
-            supervisor_previous_interrupt_enable: (x >> 5) & 1 !=0,
-            machine_interrupt_enable: (x >> 3) & 1 !=0,
-            supervisor_interrupt_enable: (x >> 1) & 1 !=0,
+            machine_previous_interrupt_enable: (x >> 7) & 1 != 0,
+            supervisor_previous_interrupt_enable: (x >> 5) & 1 != 0,
+            machine_interrupt_enable: (x >> 3) & 1 != 0,
+            supervisor_interrupt_enable: (x >> 1) & 1 != 0,
         }
     }
     pub fn encode(&self) -> u64 {

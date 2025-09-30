@@ -4,6 +4,7 @@ use citrusrs::Cpu;
 
 #[test]
 fn run_machine_roms() {
+    let mut errors = vec![];
     for rom in fs::read_dir("tests/machine/roms").unwrap() {
         let rom = rom.unwrap();
         if rom.file_type().unwrap().is_file() {
@@ -25,9 +26,28 @@ fn run_machine_roms() {
             while cpu.step().is_none() && cycles < 1000000 {
                 cycles += 1;
             }
-            assert_ne!(cycles, 1000000, "pc: 0x{:x}, test failed: {}", cpu.pc, rom.file_name().to_string_lossy());
+            if cycles == 1000000 {
+                errors.push(format!(
+                    "{}, too many cycles, pc: 0x{:x}",
+                    rom.file_name().to_string_lossy(),
+                    cpu.pc
+                ));
+                continue;
+            }
             let errcode = cpu.registers[10];
-            assert_eq!(errcode, 0, "{}, mscratch: 0x{:x}, test failed: {}", rom.file_name().to_string_lossy(), cpu.csrs.mscratch, (errcode & !1) >> 1)
+            if errcode != 0 {
+                errors.push(format!(
+                    "{}, test failed: {} ({errcode})",
+                    rom.file_name().to_string_lossy(),
+                    (errcode & !1) >> 1
+                ));
+            }
         }
+    }
+    if !errors.is_empty() {
+        for e in errors {
+            eprintln!("{e}");
+        }
+        panic!("one or more tests failed")
     }
 }
