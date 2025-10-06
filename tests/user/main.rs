@@ -23,7 +23,7 @@ fn run_user_roms() {
             cpu.pc = elf.entry;
             // check x10 for error
             let mut cycles = 0;
-            while cpu.step().is_none() || cycles < 1000000 {
+            while cpu.step().is_none() && cycles < 1000000 {
                 cycles += 1;
             }
             if cycles == 1000000 {
