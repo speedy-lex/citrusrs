@@ -3,5 +3,8 @@ name = "citrusrs"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["emulator"]
+
 [dependencies]
 goblin = { version = "0.10.2", features = ["elf64", "elf32", "endian_fd"], default-features = false }
