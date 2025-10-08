@@ -138,28 +138,35 @@ impl Cpu {
         ret
     }
     fn handle_exception(&mut self, exception: Exception) {
-        match exception {
+        let (priviledge, tvec) = match exception {
             Exception::InstructionAddressMisaligned { pc } => {
-                self.csrs.write_exception(self.priviledge, pc, 0, 0);
+                self.csrs.write_exception(self.priviledge, pc, 0, 0)
             }
             Exception::IllegalInstruction { pc, instruction } => {
                 self.csrs
-                    .write_exception(self.priviledge, pc, 2, instruction as u64);
+                    .write_exception(self.priviledge, pc, 2, instruction as u64)
             }
             Exception::Breakpoint { pc } => {
-                panic!("EBREAK: 0x{pc:x}");
+                 self.csrs.write_exception(self.priviledge, pc, 3, 0) // needs rework
             }
             Exception::LoadAccessFault { pc, addr } => {
-                self.csrs.write_exception(self.priviledge, pc, 5, addr);
+                self.csrs.write_exception(self.priviledge, pc, 5, addr)
             }
             Exception::StoreAccessFault { pc, addr } => {
-                self.csrs.write_exception(self.priviledge, pc, 7, addr);
+                self.csrs.write_exception(self.priviledge, pc, 7, addr)
             }
             Exception::Ecall { pc } => {
-                self.csrs.write_exception(self.priviledge, pc, 0, 0); // needs rework
+                let cause = match self.priviledge {
+                    Priviledge::Machine => 11,
+                    Priviledge::Hypervisor => unimplemented!(),
+                    Priviledge::Supervisor => 9,
+                    Priviledge::User => 8,
+                };
+                self.csrs.write_exception(self.priviledge, pc, cause, 0)
             }
-        }
-        self.pc = self.csrs.mtvec & !0b11;
+        };
+        self.pc = tvec & !0b11;
+        self.priviledge = priviledge;
     }
     fn read_csr(&mut self, addr: u64, pc: u64, instruction: u32) -> Result<u64, Exception> {
         if Priviledge::from((addr & 0b0011_0000_0000) >> 8) > self.priviledge {
@@ -533,17 +540,64 @@ impl Cpu {
             }
             0b0001111 => {} // fence stuff which is a NOP in this emulator
             0b1110011 => {
-                // ECALL + EBREAK + Zicsr stuff
+                // System instruction
                 let mut decoded = IType::decode(instruction);
                 decoded.imm &= 0b1111_1111_1111;
                 let csr = decoded.imm as u64;
                 match decoded.funct3 {
                     0 => {
-                        if instruction == 0b00110000001000000000000001110011 {
-                            self.pc = self.read_csr(0x341, self.pc, instruction)?;
-                            return Ok(());
+                        let decoded = RType::decode(instruction);
+                        
+                        match decoded.rs2 {
+                            0 => {
+                                // ECALL
+                                if decoded.funct7 != 0 || decoded.rs1 != 0 || decoded.rd != 0 {
+                                    return Err(Exception::IllegalInstruction { pc: self.pc, instruction });
+                                }
+
+                                return Err(Exception::Ecall { pc: self.pc });
+                            }
+                            1 => {
+                                // EBREAK
+                                if decoded.funct7 != 0 || decoded.rs1 != 0 || decoded.rd != 0 {
+                                    return Err(Exception::IllegalInstruction { pc: self.pc, instruction });
+                                }
+
+                                return Err(Exception::Breakpoint { pc: self.pc });
+                            }
+                            2 => {
+                                // interrupt return
+                                if decoded.rs1 != 0 || decoded.rd != 0 {
+                                    return Err(Exception::IllegalInstruction { pc: self.pc, instruction });
+                                }
+                                match decoded.funct7 {
+                                    0b0001000 => {
+                                        // sret
+                                        if self.priviledge < Priviledge::Supervisor {
+                                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction });
+                                        }
+                                        todo!();
+                                    }
+                                    0b0011000 => {
+                                        // mret
+                                        if self.priviledge < Priviledge::Machine {
+                                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction });
+                                        }
+                                        self.pc = self.read_csr(0x341, self.pc, instruction)?;
+                                        self.priviledge = self.csrs.mret();
+                                        return Ok(());
+                                    }
+                                    _ => { return Err(Exception::IllegalInstruction { pc: self.pc, instruction }) }
+                                }
+                            }
+                            5 => {
+                                // wfi
+                                todo!("wfi");
+                            }
+                            _ => {
+                                return Err(Exception::IllegalInstruction { pc: self.pc, instruction });
+                            }
                         }
-                        return Err(Exception::Ecall { pc: self.pc });
                     }
                     1 => {
                         // CSRRW
