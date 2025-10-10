@@ -188,7 +188,13 @@ impl Cpu {
         Ok(())
     }
     fn step_inner(&mut self) -> Result<(), Exception> {
-        let instruction = self.mem.read_word(self.pc);
+        let compressed_instruction = self.mem.read_hword(self.pc);
+        
+        if compressed_instruction & 0b11 != 0b11 {
+            return self.execute_compressed(compressed_instruction);
+        }
+
+        let instruction = ((self.mem.read_hword(self.pc.wrapping_add(2)) as u32) << 16) | compressed_instruction as u32;
 
         let opcode = instruction & 0b111_1111;
 
@@ -693,5 +699,16 @@ impl Cpu {
         self.pc += 4;
 
         Ok(())
+    }
+    fn execute_compressed(&mut self, instruction: u16) -> Result<(), Exception> {
+        let quadrant = instruction & 0b11;
+        match quadrant {
+            0b00 => {}
+            0b01 => {}
+            0b10 => {}
+            _ => unreachable!(),
+        }
+        self.pc += 2;
+        todo!("compressed");
     }
 }
