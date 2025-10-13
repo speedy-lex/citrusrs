@@ -139,14 +139,12 @@ impl CRType {
 #[derive(Debug)]
 pub struct CIType {
     pub r1: u8,
-    pub funct3: u8,
     pub imm: u16,
 }
 impl CIType {
     pub const fn decode(x: u16) -> Self {
         Self {
             r1: ((x >> 7) & 0b1_1111) as u8,
-            funct3: ((x >> 13) & 0b111) as u8,
             imm: x & 0b0001_0000_0111_1100,
         }
     }
@@ -155,14 +153,12 @@ impl CIType {
 #[derive(Debug)]
 pub struct CSSType {
     pub rs2: u8,
-    pub funct3: u8,
     pub imm: u16,
 }
 impl CSSType {
     pub const fn decode(x: u16) -> Self {
         Self {
             rs2: ((x >> 2) & 0b1_1111) as u8, 
-            funct3: ((x >> 13) & 0b111) as u8,
             imm: x & 0b0001_1111_1000_0000,
         }
     }
@@ -171,14 +167,12 @@ impl CSSType {
 #[derive(Debug)]
 pub struct CIWType {
     pub rd: u8,
-    pub funct3: u8,
     pub imm: u16,
 }
 impl CIWType {
     pub const fn decode(x: u16) -> Self {
         Self {
             rd: 0b1000 | ((x >> 2) & 0b111) as u8,
-            funct3: ((x >> 13) & 0b111) as u8,
             imm: x & 0b0001_1111_1110_0000,
         }
     }
@@ -188,7 +182,6 @@ impl CIWType {
 pub struct CLType {
     pub rs1: u8,
     pub rd: u8,
-    pub funct3: u8,
     pub imm: u16,
 }
 impl CLType {
@@ -196,7 +189,6 @@ impl CLType {
         Self {
             rs1: 0b1000 | ((x >> 7) & 0b111) as u8,
             rd: 0b1000 | ((x >> 2) & 0b111) as u8,
-            funct3: ((x >> 13) & 0b111) as u8,
             imm: x & 0b0001_1100_0110_0000,
         }
     }
@@ -206,7 +198,6 @@ impl CLType {
 pub struct CSType {
     pub rs1: u8,
     pub rs2: u8,
-    pub funct3: u8,
     pub imm: u16,
 }
 impl CSType {
@@ -214,7 +205,6 @@ impl CSType {
         Self {
             rs1: 0b1000 | ((x >> 7) & 0b111) as u8,
             rs2: 0b1000 | ((x >> 2) & 0b111) as u8,
-            funct3: ((x >> 13) & 0b111) as u8,
             imm: x & 0b0001_1100_0110_0000,
         }
     }
@@ -241,14 +231,12 @@ impl CAType {
 #[derive(Debug)]
 pub struct CBType {
     pub r1: u8,
-    pub funct3: u8,
     pub offset: u16,
 }
 impl CBType {
     pub const fn decode(x: u16) -> Self {
         Self {
             r1: 0b1000 | ((x >> 7) & 0b111) as u8,
-            funct3: ((x >> 13) & 0b111) as u8,
             offset: x & 0b0001_1100_0111_1100,
         }
     }
@@ -256,13 +244,11 @@ impl CBType {
 
 #[derive(Debug)]
 pub struct CJType {
-    pub funct3: u8,
     pub target: u16,
 }
 impl CJType {
     pub const fn decode(x: u16) -> Self {
         Self {
-            funct3: ((x >> 13) & 0b111) as u8,
             target: x & 0b0001_1111_1111_1100,
         }
     }

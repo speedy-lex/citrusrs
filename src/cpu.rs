@@ -1,6 +1,6 @@
 use crate::cpu::{
     csrs::Csrs,
-    decoder::{BType, IType, JType, RType, SType, UType},
+    decoder::{sext, BType, CAType, CBType, CIType, CIWType, CJType, CLType, CRType, CSSType, CSType, IType, JType, RType, SType, UType},
 };
 
 mod csrs;
@@ -702,13 +702,387 @@ impl Cpu {
     }
     fn execute_compressed(&mut self, instruction: u16) -> Result<(), Exception> {
         let quadrant = instruction & 0b11;
+        let funct3 = instruction >> 13;
         match quadrant {
-            0b00 => {}
-            0b01 => {}
-            0b10 => {}
+            0b00 => {
+                match funct3 {
+                    0 => {
+                        // C.ADDI4SPN
+                        let decoded = CIWType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        if imm == 0 {
+                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                        }
+
+                        let uimm = ((imm & 0b0001_1000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0111_1000_0000) >> 1)
+                            | ((imm & 0b0000_0000_0100_0000) >> 4)
+                            | ((imm & 0b0000_0000_0010_0000) >> 2);
+                        
+                        self.registers[decoded.rd as usize] = self.registers[2] + uimm as u64;
+                    }
+                    1 => {
+                        // C.FLD
+                        // TODO: D extension
+                        return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                    }
+                    2 => {
+                        // C.LW
+                        let decoded = CLType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let offset = ((imm & 0b0001_1100_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0100_0000) >> 4)
+                            | ((imm & 0b0000_0000_0010_0000) << 1);
+
+                        self.registers[decoded.rd as usize] = sext32(self.mem.read_word(self.registers[decoded.rs1 as usize] + offset as u64));
+                    }
+                    3 => {
+                        // C.LD
+                        let decoded = CLType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let offset = ((imm & 0b0001_1100_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0110_0000) << 1);
+
+                        self.registers[decoded.rd as usize] = self.mem.read_dword(self.registers[decoded.rs1 as usize] + offset as u64);
+                    }
+                    5 => {
+                        // C.FSD
+                        // TODO: D extension
+                        return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                    }
+                    6 => {
+                        // C.SW
+                        let decoded = CSType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let offset = ((imm & 0b0001_1100_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0100_0000) >> 4)
+                            | ((imm & 0b0000_0000_0010_0000) << 1);
+
+                        self.mem.write_word(self.registers[decoded.rs1 as usize] + offset as u64, self.registers[decoded.rs2 as usize] as u32);
+                    }
+                    7 => {
+                        // C.SD
+                        let decoded = CSType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let offset = ((imm & 0b0001_1100_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0110_0000) << 1);
+
+                        self.mem.write_dword(self.registers[decoded.rs1 as usize] + offset as u64, self.registers[decoded.rs2 as usize]);
+                    }
+                    _ => return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 }),
+                }
+            }
+            0b01 => {
+                match funct3 {
+                    0 => {
+                        // C.ADDI
+                        let decoded = CIType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_0000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0111_1100) >> 2);
+
+                        self.registers[decoded.r1 as usize] = self.registers[decoded.r1 as usize].wrapping_add(sext32(sext(imm as u32, 6)));
+                    }
+                    1 => {
+                        // C.ADDIW
+                        let decoded = CIType::decode(instruction);
+
+                        if decoded.r1 == 0 {
+                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                        }
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_0000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0111_1100) >> 2);
+
+                        let val = (self.registers[decoded.r1 as usize] as u32).wrapping_add(sext(imm as u32, 6));
+
+                        self.registers[decoded.r1 as usize] = sext32(val);
+                    }
+                    2 => {
+                        // C.LI
+                        let decoded = CIType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_0000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0111_1100) >> 2);
+                    
+                        self.registers[decoded.r1 as usize] = sext32(sext(imm as u32, 6));
+                    }
+                    3 => {
+                        // C.ADDI16SP + C.LUI
+                        let decoded = CIType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        if imm == 0 {
+                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                        }
+                        if decoded.r1 == 2 {
+                            // C.ADDI16SP
+                            let imm = ((imm & 0b0001_0000_0000_0000) >> 3)
+                                | ((imm & 0b0000_0000_0100_0000) >> 2)
+                                | ((imm & 0b0000_0000_0010_0000) << 1)
+                                | ((imm & 0b0000_0000_0001_1000) << 4)
+                                | ((imm & 0b0000_0000_0000_0100) << 3);
+                            let imm = sext(imm as u32, 10);
+
+                            self.registers[2] = self.registers[2].wrapping_add(sext32(imm));
+                        } else {
+                            // C.LUI
+                            let imm = ((imm as u32 & 0b0001_0000_0000_0000) << 5)
+                                | ((imm as u32 & 0b0000_0000_0111_1100) << 10);
+                            let imm = sext(imm, 18);
+
+                            self.registers[decoded.r1 as usize] = sext32(imm);
+                        }
+                    }
+                    4 => {
+                        let selector = (instruction & 0b0000_1100_0000_0000) >> 10;
+                        match selector {
+                            0 => {
+                                // C.SRLI
+                                let decoded = CBType::decode(instruction);
+                                
+                                let imm = decoded.offset;
+                                let shamt = ((imm & 0b0001_0000_0000_0000) >> 7)
+                                    | ((imm & 0b0000_0000_0111_1100) >> 2);
+
+                                self.registers[decoded.r1 as usize] >>= shamt;
+                            }
+                            1 => {
+                                // C.SRAI
+                                let decoded = CBType::decode(instruction);
+                                
+                                let imm = decoded.offset;
+                                let shamt = ((imm & 0b0001_0000_0000_0000) >> 7)
+                                    | ((imm & 0b0000_0000_0111_1100) >> 2);
+
+                                self.registers[decoded.r1 as usize] = ((self.registers[decoded.r1 as usize] as i64) >> shamt) as u64;
+                            }
+                            2 => {
+                                // C.ANDI
+                                let decoded = CBType::decode(instruction);
+
+                                let imm = decoded.offset;
+                                let imm = ((imm & 0b0001_0000_0000_0000) >> 7)
+                                    | ((imm & 0b0000_0000_0111_1100) >> 2);
+                                
+                                self.registers[decoded.r1 as usize] &= sext32(sext(imm as u32, 6))
+                            }
+                            3 => {
+                                // the other stuff
+                                let decoded = CAType::decode(instruction);
+
+                                let rs2 = self.registers[decoded.rs2 as usize];
+                                let r1 = &mut self.registers[decoded.r1 as usize];
+                                match ((decoded.funct6 & 0b100) >> 2, decoded.funct2) {
+                                    (0, 0) => {
+                                        // C.SUB
+                                        *r1 = r1.wrapping_sub(rs2);
+                                    }
+                                    (0, 1) => {
+                                        // C.XOR
+                                        *r1 ^= rs2
+                                    }
+                                    (0, 2) => {
+                                        // C.OR
+                                        *r1 |= rs2
+                                    }
+                                    (0, 3) => {
+                                        // C.AND
+                                        *r1 &= rs2
+                                    }
+                                    (1, 0) => {
+                                        // C.SUBW
+                                        *r1 = sext32(r1.wrapping_sub(rs2) as u32)
+                                    }
+                                    (1, 1) => {
+                                        // C.ADDW
+                                        *r1 = sext32(r1.wrapping_add(rs2) as u32)
+                                    }
+                                    _ => return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 }),
+                                }
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    5 => {
+                        // C.J
+                        let decoded = CJType::decode(instruction);
+                        
+                        let imm = decoded.target;
+                        let target = ((imm & 0b0001_0000_0000_0000) >> 1)
+                            | ((imm & 0b0000_1000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0110_0000_0000) >> 1)
+                            | ((imm & 0b0000_0001_0000_0000) << 2)
+                            | ((imm & 0b0000_0000_1000_0000) >> 1)
+                            | ((imm & 0b0000_0000_0100_0000) << 1)
+                            | ((imm & 0b0000_0000_0011_1000) >> 2)
+                            | ((imm & 0b0000_0000_0000_0100) << 3);
+                    
+                        self.pc = self.pc.wrapping_add(sext32(sext(target as u32, 11)));
+
+                        return Ok(());
+                    }
+                    6 => {
+                        // C.BEQZ
+                        let decoded = CBType::decode(instruction);
+
+                        let offset = decoded.offset;
+                        let offset = ((offset & 0b0001_0000_0000_0000) >> 4)
+                            | ((offset & 0b0000_1100_0000_0000) >> 7)
+                            | ((offset & 0b0000_0000_0110_0000) << 1)
+                            | ((offset & 0b0000_0000_0001_1000) >> 2)
+                            | ((offset & 0b0000_0000_0000_0100) << 3);
+
+                        let branch = self.registers[decoded.r1 as usize] == 0;
+
+                        if branch {
+                            self.pc = self.pc.wrapping_add(sext32(sext(offset as u32, 9)));
+                            return Ok(())
+                        }                     
+                    }
+                    7 => {
+                        // C.BNEZ
+                        let decoded = CBType::decode(instruction);
+
+                        let offset = decoded.offset;
+                        let offset = ((offset & 0b0001_0000_0000_0000) >> 4)
+                            | ((offset & 0b0000_1100_0000_0000) >> 7)
+                            | ((offset & 0b0000_0000_0110_0000) << 1)
+                            | ((offset & 0b0000_0000_0001_1000) >> 2)
+                            | ((offset & 0b0000_0000_0000_0100) << 3);
+
+                        let branch = self.registers[decoded.r1 as usize] != 0;
+
+                        if branch {
+                            self.pc = self.pc.wrapping_add(sext32(sext(offset as u32, 9)));
+                            return Ok(())
+                        }
+                    }
+                    _ => return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 }),
+                }
+            }
+            0b10 => {
+                match funct3 {
+                    0 => {
+                        // C.SLLI
+                        let decoded = CIType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_0000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0111_1100) >> 2);
+
+                        self.registers[decoded.r1 as usize] <<= imm;
+                    }
+                    1 => {
+                        // C.FLDSP
+                        // TODO: D extension
+                        return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                    }
+                    2 => {
+                        // C.LWSP
+                        let decoded = CIType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_0000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0111_0000) >> 2)
+                            | ((imm & 0b0000_0000_0000_1100) << 4);
+
+                        if decoded.r1 == 0 {
+                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                        }
+
+                        self.registers[decoded.r1 as usize] = sext32(self.mem.read_word(self.registers[2].wrapping_add(imm as u64)));
+                    }
+                    3 => {
+                        // C.LDSP
+                        let decoded = CIType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_0000_0000_0000) >> 7)
+                            | ((imm & 0b0000_0000_0110_0000) >> 2)
+                            | ((imm & 0b0000_0000_0001_1100) << 4);
+
+                        if decoded.r1 == 0 {
+                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                        }
+
+                        self.registers[decoded.r1 as usize] = self.mem.read_dword(self.registers[2].wrapping_add(imm as u64));
+                    }
+                    4 => {
+                        // bunch of stuff
+                        let decoded = CRType::decode(instruction);
+                        match (decoded.funct4 & 1, decoded.r1, decoded.rs2) {
+                            (0, rs1, 0) => {
+                                // C.JR
+                                if rs1 == 0 {
+                                    return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                                }
+                                self.pc = self.registers[rs1 as usize];
+                                return Ok(());
+                            }
+                            (0, rd, rs2) => {
+                                // C.MV
+                                self.registers[rd as usize] = self.registers[rs2 as usize]
+                            }
+                            (1, 0, 0) => {
+                                // C.EBREAK
+                                return Err(Exception::Breakpoint { pc: self.pc });
+                            }
+                            (1, rs1, 0) => {
+                                // C.JALR
+                                let target = self.registers[rs1 as usize];
+                                self.registers[1] = self.pc.wrapping_add(2);
+                                self.pc = target;
+                                return Ok(());
+                            }
+                            (1, r1, rs2) => {
+                                // C.ADD
+                                self.registers[r1 as usize] = self.registers[r1 as usize].wrapping_add(self.registers[rs2 as usize]);
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    5 => {
+                        // C.FSDSP
+                        // TODO: D extension
+                        return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 });
+                    }
+                    6 => {
+                        // C.SWSP
+                        let decoded = CSSType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_1110_0000_0000) >> 7)
+                            | ((imm & 0b0000_0001_1000_0000) >> 1);
+
+                        self.mem.write_word(self.registers[2].wrapping_add(imm as u64), self.registers[decoded.rs2 as usize] as u32);
+                    }
+                    7 => {
+                        // C.SDSP
+                        let decoded = CSSType::decode(instruction);
+
+                        let imm = decoded.imm;
+                        let imm = ((imm & 0b0001_1100_0000_0000) >> 7)
+                            | ((imm & 0b0000_0011_1000_0000) >> 1);
+
+                        self.mem.write_dword(self.registers[2].wrapping_add(imm as u64), self.registers[decoded.rs2 as usize]);
+                    }
+                    _ => return Err(Exception::IllegalInstruction { pc: self.pc, instruction: instruction as u32 }),
+                }
+            }
             _ => unreachable!(),
         }
+        
         self.pc += 2;
-        todo!("compressed");
+
+        Ok(())
     }
 }

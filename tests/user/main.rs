@@ -25,6 +25,9 @@ fn run_user_roms() {
             let mut cycles = 0;
             while cpu.step().is_none() && cycles < 1000000 {
                 cycles += 1;
+                if rom.file_name().to_string_lossy().contains("rvc") {
+                    println!("{:x}", cpu.pc);
+                }
             }
             if cycles == 1000000 {
                 errors.push(format!(
