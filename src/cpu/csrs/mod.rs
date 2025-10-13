@@ -44,7 +44,7 @@ impl Default for Csrs {
             sscratch: Default::default(),
             sepc: Default::default(),
             scause: Default::default(),
-            stval: Default::default(), 
+            stval: Default::default(),
         }
     }
 }
@@ -52,7 +52,13 @@ impl Csrs {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn write_exception(&mut self, pp: Priviledge, epc: u64, cause: u64, tval: u64) -> (Priviledge, u64) {
+    pub fn write_exception(
+        &mut self,
+        pp: Priviledge,
+        epc: u64,
+        cause: u64,
+        tval: u64,
+    ) -> (Priviledge, u64) {
         let is_machine = pp >= Priviledge::Machine || ((self.medeleg >> cause) & 1 == 0);
         if is_machine {
             self.mstatus.machipe_previous_priviledge = pp;
@@ -74,8 +80,12 @@ impl Csrs {
     }
     /// Returns the new priviledge level
     pub fn mret(&mut self) -> Priviledge {
-        self.mstatus.machine_interrupt_enable = mem::replace(&mut self.mstatus.machine_previous_interrupt_enable, true);
-        mem::replace(&mut self.mstatus.machipe_previous_priviledge, Priviledge::Supervisor)
+        self.mstatus.machine_interrupt_enable =
+            mem::replace(&mut self.mstatus.machine_previous_interrupt_enable, true);
+        mem::replace(
+            &mut self.mstatus.machipe_previous_priviledge,
+            Priviledge::Supervisor,
+        )
     }
     pub fn read(&mut self, addr: u64) -> u64 {
         match addr {

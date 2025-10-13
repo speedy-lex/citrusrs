@@ -158,7 +158,7 @@ pub struct CSSType {
 impl CSSType {
     pub const fn decode(x: u16) -> Self {
         Self {
-            rs2: ((x >> 2) & 0b1_1111) as u8, 
+            rs2: ((x >> 2) & 0b1_1111) as u8,
             imm: x & 0b0001_1111_1000_0000,
         }
     }
@@ -253,4 +253,3 @@ impl CJType {
         }
     }
 }
-
