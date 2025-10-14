@@ -505,6 +505,54 @@ impl Cpu {
                         // AND
                         *reg = src1 & src2;
                     }
+                    (1, 0) => {
+                        // MUL
+                        *reg = src1.wrapping_mul(src2);
+                    }
+                    (1, 1) => {
+                        // MULH
+                        *reg = ((src1 as i64 as i128 * src2 as i64 as i128) >> 64) as u64;
+                    }
+                    (1, 2) => {
+                        // MULHSU
+                        *reg = ((src1 as i64 as i128 * src2 as i128) >> 64) as u64;
+                    }
+                    (1, 3) => {
+                        // MULHU
+                        *reg = ((src1 as u128 * src2 as u128) >> 64) as u64;
+                    }
+                    (1, 4) => {
+                        // DIV
+                        if src2 == 0 {
+                            *reg = u64::MAX;
+                        } else {
+                            *reg = (src1 as i64).checked_div(src2 as i64).unwrap_or(i64::MIN) as u64;
+                        }
+                    }
+                    (1, 5) => {
+                        // DIVU
+                        if src2 == 0 {
+                            *reg = u64::MAX;
+                        } else {
+                            *reg = src1 / src2;
+                        }
+                    }
+                    (1, 6) => {
+                        // REM
+                        if src2 == 0 {
+                            *reg = src1;
+                        } else {
+                            *reg = (src1 as i64).checked_rem(src2 as i64).unwrap_or(0) as u64;
+                        }
+                    }
+                    (1, 7) => {
+                        // REMU
+                        if src2 == 0 {
+                            *reg = src1
+                        } else {
+                            *reg = src1 % src2
+                        }
+                    }
                     (_, _) => {
                         return Err(Exception::IllegalInstruction {
                             pc: self.pc,
@@ -539,6 +587,42 @@ impl Cpu {
                     (0b0100000, 5) => {
                         // SRAW
                         *reg = sext32(((src1 as i32) >> (src2 & 0b1_1111)) as u32);
+                    }
+                    (1, 0) => {
+                        // MULW
+                        *reg = sext32(src1.wrapping_mul(src2));
+                    }
+                    (1, 4) => {
+                        // DIVW
+                        if src2 == 0 {
+                            *reg = u64::MAX;
+                        } else {
+                            *reg = sext32((src1 as i32).checked_div(src2 as i32).unwrap_or(i32::MIN) as u32);
+                        }
+                    }
+                    (1, 5) => {
+                        // DIVUW
+                        if src2 == 0 {
+                            *reg = u64::MAX;
+                        } else {
+                            *reg = sext32(src1 / src2);
+                        }
+                    }
+                    (1, 6) => {
+                        // REMW
+                        if src2 == 0 {
+                            *reg = sext32(src1);
+                        } else {
+                            *reg = sext32((src1 as i32).checked_rem(src2 as i32).unwrap_or(0) as u32);
+                        }
+                    }
+                    (1, 7) => {
+                        // REMUW
+                        if src2 == 0 {
+                            *reg = sext32(src1)
+                        } else {
+                            *reg = sext32(src1 % src2)
+                        }
                     }
                     (_, _) => {
                         return Err(Exception::IllegalInstruction {
