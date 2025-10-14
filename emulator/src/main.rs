@@ -9,7 +9,6 @@ fn main() {
     let mut cpu = Cpu::new(mem);
     cpu.pc = 0x8000_0000;
     cpu.registers[11] = 0x8000_0000 + 32 * 1024 * 1024; // dt addr
-    println!("{:x}", cpu.mem.read_byte(0x8000_0000));
     loop {
         cpu.step();
         if cpu.pc == 0 {
