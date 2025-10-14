@@ -737,20 +737,14 @@ impl Cpu {
                         // C.ADDI4SPN
                         let decoded = CIWType::decode(instruction);
 
-                        let imm = decoded.imm;
-                        if imm == 0 {
+                        if decoded.imm == 0 {
                             return Err(Exception::IllegalInstruction {
                                 pc: self.pc,
                                 instruction: instruction as u32,
                             });
                         }
 
-                        let uimm = ((imm & 0b0001_1000_0000_0000) >> 7)
-                            | ((imm & 0b0000_0111_1000_0000) >> 1)
-                            | ((imm & 0b0000_0000_0100_0000) >> 4)
-                            | ((imm & 0b0000_0000_0010_0000) >> 2);
-
-                        self.registers[decoded.rd as usize] = self.registers[2] + uimm as u64;
+                        self.registers[decoded.rd as usize] = self.registers[2] + decoded.imm as u64;
                     }
                     1 => {
                         // C.FLD
@@ -982,17 +976,7 @@ impl Cpu {
                         // C.J
                         let decoded = CJType::decode(instruction);
 
-                        let imm = decoded.target;
-                        let target = ((imm & 0b0001_0000_0000_0000) >> 1)
-                            | ((imm & 0b0000_1000_0000_0000) >> 7)
-                            | ((imm & 0b0000_0110_0000_0000) >> 1)
-                            | ((imm & 0b0000_0001_0000_0000) << 2)
-                            | ((imm & 0b0000_0000_1000_0000) >> 1)
-                            | ((imm & 0b0000_0000_0100_0000) << 1)
-                            | ((imm & 0b0000_0000_0011_1000) >> 2)
-                            | ((imm & 0b0000_0000_0000_0100) << 3);
-
-                        self.pc = self.pc.wrapping_add(sext32(sext(target as u32, 11)));
+                        self.pc = self.pc.wrapping_add(sext32(decoded.target));
 
                         return Ok(());
                     }
@@ -1000,17 +984,12 @@ impl Cpu {
                         // C.BEQZ
                         let decoded = CBType::decode(instruction);
 
-                        let offset = decoded.offset;
-                        let offset = ((offset & 0b0001_0000_0000_0000) >> 4)
-                            | ((offset & 0b0000_1100_0000_0000) >> 7)
-                            | ((offset & 0b0000_0000_0110_0000) << 1)
-                            | ((offset & 0b0000_0000_0001_1000) >> 2)
-                            | ((offset & 0b0000_0000_0000_0100) << 3);
+                        let offset = decoded.decode_branch_offset();
 
                         let branch = self.registers[decoded.r1 as usize] == 0;
 
                         if branch {
-                            self.pc = self.pc.wrapping_add(sext32(sext(offset as u32, 9)));
+                            self.pc = self.pc.wrapping_add(sext32(offset));
                             return Ok(());
                         }
                     }
@@ -1018,17 +997,12 @@ impl Cpu {
                         // C.BNEZ
                         let decoded = CBType::decode(instruction);
 
-                        let offset = decoded.offset;
-                        let offset = ((offset & 0b0001_0000_0000_0000) >> 4)
-                            | ((offset & 0b0000_1100_0000_0000) >> 7)
-                            | ((offset & 0b0000_0000_0110_0000) << 1)
-                            | ((offset & 0b0000_0000_0001_1000) >> 2)
-                            | ((offset & 0b0000_0000_0000_0100) << 3);
+                        let offset = decoded.decode_branch_offset();
 
                         let branch = self.registers[decoded.r1 as usize] != 0;
 
                         if branch {
-                            self.pc = self.pc.wrapping_add(sext32(sext(offset as u32, 9)));
+                            self.pc = self.pc.wrapping_add(sext32(offset));
                             return Ok(());
                         }
                     }
@@ -1151,12 +1125,8 @@ impl Cpu {
                         // C.SWSP
                         let decoded = CSSType::decode(instruction);
 
-                        let imm = decoded.imm;
-                        let imm = ((imm & 0b0001_1110_0000_0000) >> 7)
-                            | ((imm & 0b0000_0001_1000_0000) >> 1);
-
                         self.mem.write_word(
-                            self.registers[2].wrapping_add(imm as u64),
+                            self.registers[2].wrapping_add(decoded.imm as u64),
                             self.registers[decoded.rs2 as usize] as u32,
                         );
                     }
@@ -1164,12 +1134,8 @@ impl Cpu {
                         // C.SDSP
                         let decoded = CSSType::decode(instruction);
 
-                        let imm = decoded.imm;
-                        let imm = ((imm & 0b0001_1100_0000_0000) >> 7)
-                            | ((imm & 0b0000_0011_1000_0000) >> 1);
-
                         self.mem.write_dword(
-                            self.registers[2].wrapping_add(imm as u64),
+                            self.registers[2].wrapping_add(decoded.imm as u64),
                             self.registers[decoded.rs2 as usize],
                         );
                     }

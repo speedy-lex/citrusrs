@@ -104,12 +104,10 @@ pub struct JType {
 }
 impl JType {
     pub const fn decode(x: u32) -> Self {
-        #[rustfmt::skip]
-        let mut imm =
-            (x >> 20) & 0b0_0000_0000_0111_1111_1110 |
-            (x >> 9)  & 0b0_0000_0000_1000_0000_0000 |
-             x        & 0b0_1111_1111_0000_0000_0000 |
-            (x >> 11) & 0b1_0000_0000_0000_0000_0000;
+        let mut imm = (x >> 20) & 0b0_0000_0000_0111_1111_1110
+            | (x >> 9) & 0b0_0000_0000_1000_0000_0000
+            | x & 0b0_1111_1111_0000_0000_0000
+            | (x >> 11) & 0b1_0000_0000_0000_0000_0000;
         imm = sext(imm, 21);
         Self {
             rd: ((x >> 7) & 0b1_1111) as u8,
@@ -157,9 +155,11 @@ pub struct CSSType {
 }
 impl CSSType {
     pub const fn decode(x: u16) -> Self {
+        let imm = ((x & 0b0001_1110_0000_0000) >> 7)
+            | ((x & 0b0000_0001_1000_0000) >> 1);
         Self {
             rs2: ((x >> 2) & 0b1_1111) as u8,
-            imm: x & 0b0001_1111_1000_0000,
+            imm,
         }
     }
 }
@@ -171,9 +171,14 @@ pub struct CIWType {
 }
 impl CIWType {
     pub const fn decode(x: u16) -> Self {
+        let imm = ((x & 0b0001_1000_0000_0000) >> 7)
+            | ((x & 0b0000_0111_1000_0000) >> 1)
+            | ((x & 0b0000_0000_0100_0000) >> 4)
+            | ((x & 0b0000_0000_0010_0000) >> 2);
+
         Self {
             rd: 0b1000 | ((x >> 2) & 0b111) as u8,
-            imm: x & 0b0001_1111_1110_0000,
+            imm,
         }
     }
 }
@@ -240,16 +245,32 @@ impl CBType {
             offset: x & 0b0001_1100_0111_1100,
         }
     }
+    pub const fn decode_branch_offset(&self) -> u32 {
+        let offset = ((self.offset & 0b0001_0000_0000_0000) >> 4)
+            | ((self.offset & 0b0000_1100_0000_0000) >> 7)
+            | ((self.offset & 0b0000_0000_0110_0000) << 1)
+            | ((self.offset & 0b0000_0000_0001_1000) >> 2)
+            | ((self.offset & 0b0000_0000_0000_0100) << 3);
+        sext(offset as u32, 9)
+    }
 }
 
 #[derive(Debug)]
 pub struct CJType {
-    pub target: u16,
+    pub target: u32,
 }
 impl CJType {
     pub const fn decode(x: u16) -> Self {
+        let target = ((x & 0b0001_0000_0000_0000) >> 1)
+            | ((x & 0b0000_1000_0000_0000) >> 7)
+            | ((x & 0b0000_0110_0000_0000) >> 1)
+            | ((x & 0b0000_0001_0000_0000) << 2)
+            | ((x & 0b0000_0000_1000_0000) >> 1)
+            | ((x & 0b0000_0000_0100_0000) << 1)
+            | ((x & 0b0000_0000_0011_1000) >> 2)
+            | ((x & 0b0000_0000_0000_0100) << 3);
         Self {
-            target: x & 0b0001_1111_1111_1100,
+            target: sext(target as u32, 11),
         }
     }
 }
