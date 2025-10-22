@@ -632,6 +632,64 @@ impl Cpu {
                     }
                 }
             }
+            0b0101111 => {
+                // Atomics
+                let decoded = RType::decode(instruction);
+                
+                // atomic ops are only defined for 32 bits (funct3 = 2) and 64 bits (funct3 = 3)
+                if decoded.funct3 != 2 && decoded.funct3 != 3 {
+                    return Err(Exception::IllegalInstruction {
+                        pc: self.pc,
+                        instruction,
+                    });
+                }
+                
+                // bottom 2 bits of funct7 are acquire and release bits
+                // which don't matter here because this is single hart
+                let funct5 = decoded.funct7 >> 2;
+
+                match funct5 {
+                    0 => {
+                        // AMOADD
+                    }
+                    1 => {
+                        // AMOSWAP
+                    }
+                    2 => {
+                        // LR
+                    }
+                    3 => {
+                        // SC
+                    }
+                    4 => {
+                        // AMOXOR
+                    }
+                    8 => {
+                        // AMOOR
+                    }
+                    12 => {
+                        // AMOAND
+                    }
+                    16 => {
+                        // AMOMIN
+                    }
+                    20 => {
+                        // AMOMAX
+                    }
+                    24 => {
+                        // AMOMINU
+                    }
+                    28 => {
+                        // AMOMAXU
+                    }
+                    _ => {
+                        return Err(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
+                }
+            }
             0b0001111 => {} // fence stuff which is a NOP in this emulator
             0b1110011 => {
                 // System instruction
