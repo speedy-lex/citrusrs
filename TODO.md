@@ -2,7 +2,8 @@ very cool!!!!
 
 TODO:
 - clean up code
-- add csrs
-- add A extension
+- add interrupts
 - add serial port
+- S mode support
+- add csrs
 - add cool stuff

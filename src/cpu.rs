@@ -46,19 +46,26 @@ impl Memory {
             self.read_byte(addr.wrapping_add(7)),
         ])
     }
+    #[track_caller]
     pub fn write_byte(&mut self, addr: u64, val: u8) {
-        self.mem[addr as usize - 0x80000000] = val
+        if addr < 0x80000000 {
+            panic!("read unmapped address {}", addr);
+        }
+        self.mem[addr as usize - 0x80000000] = val;
     }
+    #[track_caller]
     pub fn write_hword(&mut self, addr: u64, val: u16) {
         for (i, byte) in val.to_le_bytes().into_iter().enumerate() {
             self.write_byte(addr.wrapping_add(i as u64), byte);
         }
     }
+    #[track_caller]
     pub fn write_word(&mut self, addr: u64, val: u32) {
         for (i, byte) in val.to_le_bytes().into_iter().enumerate() {
             self.write_byte(addr.wrapping_add(i as u64), byte);
         }
     }
+    #[track_caller]
     pub fn write_dword(&mut self, addr: u64, val: u64) {
         for (i, byte) in val.to_le_bytes().into_iter().enumerate() {
             self.write_byte(addr.wrapping_add(i as u64), byte);
@@ -80,7 +87,9 @@ pub enum Exception {
     InstructionAddressMisaligned { pc: u64 },
     IllegalInstruction { pc: u64, instruction: u32 },
     Breakpoint { pc: u64 },
+    LoadAddressMisaligned { pc: u64, addr: u64 },
     LoadAccessFault { pc: u64, addr: u64 },
+    StoreAddressMisaligned { pc: u64, addr: u64 },
     StoreAccessFault { pc: u64, addr: u64 },
     Ecall { pc: u64 },
 }
@@ -106,11 +115,18 @@ impl From<u64> for Priviledge {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReservationSet {
+    addr: u64,
+    size_shift: u8,
+}
+
 pub struct Cpu {
     pub registers: [u64; 32],
     pub pc: u64,
     pub csrs: Csrs,
     priviledge: Priviledge,
+    reservation_set: Option<ReservationSet>,
     pub mem: Memory,
 }
 impl Cpu {
@@ -121,6 +137,7 @@ impl Cpu {
             mem: Memory { mem },
             priviledge: Priviledge::Machine,
             csrs: Csrs::new(),
+            reservation_set: None,
         }
     }
     /// returns all ECALL/EBREAK exceptions
@@ -141,6 +158,9 @@ impl Cpu {
         ret
     }
     fn handle_exception(&mut self, exception: Exception) {
+        // if an exception happens in the middle of an LR/SC loop it's non atomic
+        self.reservation_set = None;
+
         let (priviledge, tvec) = match exception {
             Exception::InstructionAddressMisaligned { pc } => {
                 self.csrs.write_exception(self.priviledge, pc, 0, 0)
@@ -152,8 +172,14 @@ impl Cpu {
             Exception::Breakpoint { pc } => {
                 self.csrs.write_exception(self.priviledge, pc, 3, 0) // needs rework
             }
+            Exception::LoadAddressMisaligned { pc, addr } => {
+                self.csrs.write_exception(self.priviledge, pc, 4, addr)
+            }
             Exception::LoadAccessFault { pc, addr } => {
                 self.csrs.write_exception(self.priviledge, pc, 5, addr)
+            }
+            Exception::StoreAddressMisaligned { pc, addr } => {
+                self.csrs.write_exception(self.priviledge, pc, 6, addr)
             }
             Exception::StoreAccessFault { pc, addr } => {
                 self.csrs.write_exception(self.priviledge, pc, 7, addr)
@@ -531,6 +557,8 @@ impl Cpu {
                     }
                     (1, 5) => {
                         // DIVU
+                        // TODO: rewrite to use checked_div
+                        #[expect(clippy::arithmetic_side_effects)]
                         if src2 == 0 {
                             *reg = u64::MAX;
                         } else {
@@ -547,6 +575,8 @@ impl Cpu {
                     }
                     (1, 7) => {
                         // REMU
+                        // TODO: rewrite to use checked_rem
+                        #[expect(clippy::arithmetic_side_effects)]
                         if src2 == 0 {
                             *reg = src1
                         } else {
@@ -602,6 +632,8 @@ impl Cpu {
                     }
                     (1, 5) => {
                         // DIVUW
+                        // TODO: rewrite to use checked_div
+                        #[expect(clippy::arithmetic_side_effects)]
                         if src2 == 0 {
                             *reg = u64::MAX;
                         } else {
@@ -618,6 +650,8 @@ impl Cpu {
                     }
                     (1, 7) => {
                         // REMUW
+                        // TODO: rewrite to use checked_rem
+                        #[expect(clippy::arithmetic_side_effects)]
                         if src2 == 0 {
                             *reg = sext32(src1)
                         } else {
@@ -625,6 +659,161 @@ impl Cpu {
                         }
                     }
                     (_, _) => {
+                        return Err(Exception::IllegalInstruction {
+                            pc: self.pc,
+                            instruction,
+                        });
+                    }
+                }
+            }
+            0b0101111 => {
+                // Atomics
+                let decoded = RType::decode(instruction);
+                
+                // atomic ops are only defined for 32 bits (funct3 = 2) and 64 bits (funct3 = 3)
+                if decoded.funct3 != 2 && decoded.funct3 != 3 {
+                    return Err(Exception::IllegalInstruction {
+                        pc: self.pc,
+                        instruction,
+                    });
+                }
+                
+                // bottom 2 bits of funct7 are acquire and release bits
+                // which don't matter here because this is single hart
+                let funct5 = decoded.funct7 >> 2;
+
+                let addr = self.registers[decoded.rs1 as usize];
+                
+                if addr & ((1 << decoded.funct3) - 1) != 0 {
+                    if funct5 == 3 {
+                        // SC
+                        return Err(Exception::StoreAddressMisaligned { pc: self.pc, addr })
+                    } else {
+                        return Err(Exception::LoadAddressMisaligned { pc: self.pc, addr })
+                    }
+                }
+
+                match funct5 {
+                    2 => {
+                        // LR
+                        if decoded.rs2 != 0 {
+                            return Err(Exception::IllegalInstruction { pc: self.pc, instruction });
+                        }
+                        self.reservation_set = Some(ReservationSet { addr, size_shift: decoded.funct3 });
+                        self.registers[decoded.rd as usize] = if decoded.funct3 == 2 {
+                            sext32(self.mem.read_word(addr))
+                        } else {
+                            self.mem.read_dword(addr)
+                        };
+                    }
+                    3 => {
+                        // SC
+                        if self.reservation_set == Some(ReservationSet { addr, size_shift: decoded.funct3 }) {
+                            if decoded.funct3 == 2 {
+                                self.mem.write_word(addr, self.registers[decoded.rs2 as usize] as u32);
+                            } else {
+                                self.mem.write_dword(addr, self.registers[decoded.rs2 as usize]);
+                            }
+                            self.registers[decoded.rd as usize] = 0;
+                        } else {
+                            self.registers[decoded.rd as usize] = 1;
+                        }
+                        self.reservation_set = None;
+                    }
+                    0 | 1 | 4 | 8 | 12 | 16 | 20 | 24 | 28 => {
+                        if decoded.funct3 == 2 {
+                            let mut val = self.mem.read_word(addr);
+                            let rs2 = self.registers[decoded.rs2 as usize] as u32;
+                            self.registers[decoded.rd as usize] = sext32(val);
+                            match funct5 {
+                                0 => {
+                                    // AMOADD
+                                    val = val.wrapping_add(rs2);
+                                }
+                                1 => {
+                                    // AMOSWAP
+                                    val = rs2;
+                                }    
+                                4 => {
+                                    // AMOXOR
+                                    val ^= rs2;
+                                }
+                                8 => {
+                                    // AMOOR
+                                    val |= rs2;
+                                }
+                                12 => {
+                                    // AMOAND
+                                    val &= rs2;
+                                }
+                                16 => {
+                                    // AMOMIN
+                                    val = (val as i32).min(rs2 as i32) as u32;
+                                }
+                                20 => {
+                                    // AMOMAX
+                                    val = (val as i32).max(rs2 as i32) as u32;
+                                }
+                                24 => {
+                                    // AMOMINU
+                                    val = val.min(rs2);
+                                }
+                                28 => {
+                                    // AMOMAXU
+                                    val = val.max(rs2);
+                                }
+                                _ => unreachable!()
+                            }
+
+                            self.mem.write_word(addr, val);
+                        } else {
+                            let mut val = self.mem.read_dword(addr);
+                            let rs2 = self.registers[decoded.rs2 as usize];
+                            self.registers[decoded.rd as usize] = val;
+                            match funct5 {
+                                0 => {
+                                    // AMOADD
+                                    val = val.wrapping_add(rs2);
+                                }
+                                1 => {
+                                    // AMOSWAP
+                                    val = rs2;
+                                }    
+                                4 => {
+                                    // AMOXOR
+                                    val ^= rs2;
+                                }
+                                8 => {
+                                    // AMOOR
+                                    val |= rs2;
+                                }
+                                12 => {
+                                    // AMOAND
+                                    val &= rs2;
+                                }
+                                16 => {
+                                    // AMOMIN
+                                    val = (val as i64).min(rs2 as i64) as u64;
+                                }
+                                20 => {
+                                    // AMOMAX
+                                    val = (val as i64).max(rs2 as i64) as u64;
+                                }
+                                24 => {
+                                    // AMOMINU
+                                    val = val.min(rs2);
+                                }
+                                28 => {
+                                    // AMOMAXU
+                                    val = val.max(rs2);
+                                }
+                                _ => unreachable!()
+                            }
+
+                            self.mem.write_dword(addr, val);
+                        }
+                    }
+                    _ => {
                         return Err(Exception::IllegalInstruction {
                             pc: self.pc,
                             instruction,
@@ -706,7 +895,7 @@ impl Cpu {
                             }
                             5 => {
                                 // wfi
-                                todo!("wfi");
+                                // todo!("wfi");
                             }
                             _ => {
                                 return Err(Exception::IllegalInstruction {
@@ -807,7 +996,7 @@ impl Cpu {
             }
         }
 
-        self.pc += 4;
+        self.pc = self.pc.wrapping_add(4);
 
         Ok(())
     }
@@ -828,7 +1017,7 @@ impl Cpu {
                             });
                         }
 
-                        self.registers[decoded.rd as usize] = self.registers[2] + decoded.imm as u64;
+                        self.registers[decoded.rd as usize] = self.registers[2].wrapping_add(decoded.imm as u64);
                     }
                     1 => {
                         // C.FLD
@@ -849,7 +1038,7 @@ impl Cpu {
 
                         self.registers[decoded.rd as usize] = sext32(
                             self.mem
-                                .read_word(self.registers[decoded.rs1 as usize] + offset as u64),
+                                .read_word(self.registers[decoded.rs1 as usize].wrapping_add(offset as u64)),
                         );
                     }
                     3 => {
@@ -862,7 +1051,7 @@ impl Cpu {
 
                         self.registers[decoded.rd as usize] = self
                             .mem
-                            .read_dword(self.registers[decoded.rs1 as usize] + offset as u64);
+                            .read_dword(self.registers[decoded.rs1 as usize].wrapping_add(offset as u64));
                     }
                     5 => {
                         // C.FSD
@@ -882,7 +1071,7 @@ impl Cpu {
                             | ((imm & 0b0000_0000_0010_0000) << 1);
 
                         self.mem.write_word(
-                            self.registers[decoded.rs1 as usize] + offset as u64,
+                            self.registers[decoded.rs1 as usize].wrapping_add(offset as u64),
                             self.registers[decoded.rs2 as usize] as u32,
                         );
                     }
@@ -895,7 +1084,7 @@ impl Cpu {
                             | ((imm & 0b0000_0000_0110_0000) << 1);
 
                         self.mem.write_dword(
-                            self.registers[decoded.rs1 as usize] + offset as u64,
+                            self.registers[decoded.rs1 as usize].wrapping_add(offset as u64),
                             self.registers[decoded.rs2 as usize],
                         );
                     }
@@ -1234,7 +1423,7 @@ impl Cpu {
             _ => unreachable!(),
         }
 
-        self.pc += 2;
+        self.pc = self.pc.wrapping_add(2);
 
         Ok(())
     }
