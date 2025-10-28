@@ -7,5 +7,6 @@ fn main() {
             .status()
             .unwrap()
             .success()
-    )
+    );
+    println!("cargo::rerun-if-changed=src/emulator.dts");
 }

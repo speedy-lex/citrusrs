@@ -91,7 +91,9 @@ pub enum Exception {
     LoadAccessFault { pc: u64, addr: u64 },
     StoreAddressMisaligned { pc: u64, addr: u64 },
     StoreAccessFault { pc: u64, addr: u64 },
-    Ecall { pc: u64 },
+    UEcall { pc: u64 },
+    SEcall { pc: u64 },
+    MEcall { pc: u64 },
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -144,9 +146,9 @@ impl Cpu {
     pub fn step(&mut self) -> Option<Exception> {
         let exception = self.step_inner();
         let ret = match exception {
-            Err(Exception::Ecall { pc }) => {
-                self.handle_exception(Exception::Ecall { pc });
-                Some(Exception::Ecall { pc })
+            Err(Exception::MEcall { pc }) => {
+                self.handle_exception(Exception::MEcall { pc });
+                Some(Exception::MEcall { pc })
             }
             Err(exception) => {
                 self.handle_exception(exception);
@@ -184,14 +186,14 @@ impl Cpu {
             Exception::StoreAccessFault { pc, addr } => {
                 self.csrs.write_exception(self.priviledge, pc, 7, addr)
             }
-            Exception::Ecall { pc } => {
-                let cause = match self.priviledge {
-                    Priviledge::Machine => 11,
-                    Priviledge::Hypervisor => unimplemented!(),
-                    Priviledge::Supervisor => 9,
-                    Priviledge::User => 8,
-                };
-                self.csrs.write_exception(self.priviledge, pc, cause, 0)
+            Exception::UEcall { pc } => {
+                self.csrs.write_exception(self.priviledge, pc, 8, 0)
+            }
+            Exception::SEcall { pc } => {
+                self.csrs.write_exception(self.priviledge, pc, 9, 0)
+            }
+            Exception::MEcall { pc } => {
+                self.csrs.write_exception(self.priviledge, pc, 11, 0)
             }
         };
         self.pc = tvec & !0b11;
@@ -841,7 +843,12 @@ impl Cpu {
                                     });
                                 }
 
-                                return Err(Exception::Ecall { pc: self.pc });
+                                return match self.priviledge {
+                                    Priviledge::Machine => Err(Exception::MEcall { pc: self.pc }),
+                                    Priviledge::Hypervisor => todo!(),
+                                    Priviledge::Supervisor => Err(Exception::SEcall { pc: self.pc }),
+                                    Priviledge::User => Err(Exception::UEcall { pc: self.pc }),
+                                }
                             }
                             1 => {
                                 // EBREAK
